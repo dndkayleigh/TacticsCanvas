@@ -3,117 +3,98 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tactical Map Editor</title>
+    <title>Tactical Map Metadata Editor</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <h1>Tactical Map Metadata Editor</h1>
-        <p>Node backend + plain browser frontend</p>
-      </div>
-      <div class="topbar-actions">
-        <button id="validateBtn">Validate</button>
-        <button id="downloadBtn">Download JSON</button>
-        <button id="serverExportBtn">Save via Server</button>
-      </div>
-    </header>
+    <div id="app">
+      <section class="left-column">
+        <aside class="panel controls-panel">
+          <h1>Tactical Map Metadata Editor</h1>
+          <p class="muted">
+            Upload a map image. The server will load matching sidecar JSON if it exists, or create a blank one.
+          </p>
 
-    <main class="layout">
-      <aside class="sidebar">
-        <section class="panel">
-          <h2>Map</h2>
-          <label>
-            Upload map image
-            <input id="mapFileInput" type="file" accept="image/*" />
-          </label>
-          <div class="meta-block">
-            <div><strong>Name:</strong> <span id="mapName">untitled-map.png</span></div>
-            <div><strong>Size:</strong> <span id="mapSize">960 × 640</span></div>
-          </div>
-        </section>
+          <section class="section">
+            <label>Map image</label>
+            <input id="imageInput" type="file" accept="image/*" />
+          </section>
 
-        <section class="panel">
-          <h2>Grid</h2>
-          <label>
-            Tile size (px)
-            <input id="tileSizeInput" type="number" min="1" value="70" />
-          </label>
-          <label>
-            Origin X
-            <input id="originXInput" type="number" value="0" />
-          </label>
-          <label>
-            Origin Y
-            <input id="originYInput" type="number" value="0" />
-          </label>
-          <div class="meta-block">
-            <div><strong>Grid:</strong> <span id="gridDims">13 × 9</span></div>
-          </div>
-          <button id="resetBtn">Reset Metadata</button>
-        </section>
-
-        <section class="panel">
-          <h2>Tools</h2>
-          <label>
-            Tool
-            <select id="toolSelect">
-              <option value="paint">Paint Tiles</option>
-              <option value="erase">Erase Tiles</option>
-              <option value="edge">Draw Edges</option>
-              <option value="edge_erase">Erase Edges</option>
-              <option value="object">Place Objects</option>
-              <option value="object_erase">Erase Objects</option>
+          <section class="section">
+            <label>Draft model</label>
+            <select id="modelSelect">
+              <option value="gpt-4-mini">ChatGPT 4-mini</option>
+              <option value="gpt-4">ChatGPT 4</option>
+              <option value="gpt-5">ChatGPT 5</option>
             </select>
-          </label>
-          <label>
-            Tile brush
-            <select id="tileBrushSelect"></select>
-          </label>
-          <label>
-            Edge brush
-            <select id="edgeBrushSelect"></select>
-          </label>
-          <label>
-            Object brush
-            <select id="objectBrushSelect"></select>
-          </label>
-        </section>
-
-        <section class="panel">
-          <h2>Display</h2>
-          <label class="checkbox-row"><input id="showGridInput" type="checkbox" checked /> Show grid</label>
-          <label class="checkbox-row"><input id="showTilesInput" type="checkbox" checked /> Show tile overlays</label>
-          <label class="checkbox-row"><input id="showEdgesInput" type="checkbox" checked /> Show edges</label>
-          <label class="checkbox-row"><input id="showObjectsInput" type="checkbox" checked /> Show objects</label>
-          <label class="checkbox-row"><input id="showLabelsInput" type="checkbox" checked /> Show labels</label>
-        </section>
-
-        <section class="panel">
-          <h2>Validation</h2>
-          <div id="validationBox" class="status-box">Not validated yet.</div>
-        </section>
-      </aside>
-
-      <section class="main-panel">
-        <div class="canvas-wrap">
-          <img id="hiddenMapImage" alt="map" hidden />
-          <canvas id="mapCanvas" width="960" height="640"></canvas>
-        </div>
-
-        <div class="bottom-grid">
-          <section class="panel">
-            <h2>Objects</h2>
-            <div id="objectList" class="object-list"></div>
           </section>
 
-          <section class="panel">
-            <h2>Metadata Preview</h2>
-            <pre id="metadataPreview" class="preview"></pre>
+          <section class="section button-row">
+            <button id="draftAiBtn">Draft Metadata with AI</button>
+            <button id="saveBtn">Save JSON</button>
+            <button id="exportBtn">Export JSON</button>
           </section>
-        </div>
+
+          <section class="section">
+            <h2>Grid Calibration</h2>
+
+            <label>Tile size (px)</label>
+            <input id="tileSizeInput" type="number" value="70" readonly />
+
+            <div class="two-col">
+              <div>
+                <label>Rows</label>
+                <input id="rowsInput" type="number" min="1" max="40" value="10" />
+              </div>
+              <div>
+                <label>Cols</label>
+                <input id="colsInput" type="number" min="1" max="40" value="10" />
+              </div>
+            </div>
+
+            <p class="muted">
+              Square grid only. Origin is fixed to the bottom-left of the image. The larger image dimension is capped at 40 tiles and tile size is calculated automatically.
+            </p>
+          </section>
+
+          <section class="section">
+            <h2>Controls</h2>
+            <ul>
+              <li>Left click drag: pan</li>
+              <li>Mouse wheel: zoom</li>
+              <li>Right click: toggle blocking tile</li>
+            </ul>
+          </section>
+
+          <section class="section">
+            <h2>Status</h2>
+            <div id="status">No map loaded.</div>
+          </section>
+
+          <section class="section">
+            <h2>AI Draft Metrics</h2>
+            <div id="draftMetrics">No AI draft run yet.</div>
+          </section>
+
+          <section class="section">
+            <h2>Last Draft Prompt</h2>
+            <textarea id="promptView" spellcheck="false" readonly></textarea>
+          </section>
+        </aside>
+
+        <aside class="panel metadata-panel">
+          <h2>Current Metadata</h2>
+          <textarea id="metadataView" spellcheck="false"></textarea>
+        </aside>
       </section>
-    </main>
+
+      <main class="panel map-panel">
+        <div class="canvas-wrap">
+          <img id="hiddenImage" alt="map" hidden />
+          <canvas id="mapCanvas"></canvas>
+        </div>
+      </main>
+    </div>
 
     <script src="/app.js"></script>
   </body>

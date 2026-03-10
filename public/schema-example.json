@@ -1,0 +1,43 @@
+{
+  "schema_version": "0.1.0",
+  "purpose": "tactical_map_metadata",
+  "map": {
+    "name": "example-map.png",
+    "image_ref": "example-map.png",
+    "image_width_px": 1400,
+    "image_height_px": 980
+  },
+  "grid": {
+    "type": "square",
+    "origin": "bottom_left",
+    "tile_size_px": 70,
+    "rows": 14,
+    "cols": 20
+  },
+  "layers": {
+    "blocking": [
+      [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, false, true],
+      [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true, true]
+    ]
+  },
+  "ai_annotation": {
+    "status": "drafted",
+    "model": "stub-server-pass",
+    "scope": "blocking_only",
+    "notes": [
+      "Example schema file for the MVP."
+    ]
+  }
+}

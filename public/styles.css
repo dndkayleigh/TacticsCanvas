@@ -1,0 +1,161 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 100%;
+  height: 100%;
+  background: #0b1020;
+  color: #e5e7eb;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+#app {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 12px;
+  height: 100vh;
+  padding: 12px;
+}
+
+.left-column {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+  gap: 12px;
+  min-height: 0;
+}
+
+.panel {
+  background: #111827;
+  border: 1px solid #1f2937;
+  border-radius: 14px;
+  padding: 14px;
+  overflow: hidden;
+}
+
+.controls-panel,
+.metadata-panel {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.metadata-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.map-panel {
+  padding: 10px;
+}
+
+.canvas-wrap {
+  width: 100%;
+  height: 100%;
+  background: #000;
+  border: 1px solid #1f2937;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+#mapCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+}
+
+#mapCanvas.dragging {
+  cursor: grabbing;
+}
+
+h1,
+h2 {
+  margin-top: 0;
+}
+
+.section {
+  margin-bottom: 18px;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 14px;
+  color: #cbd5e1;
+}
+
+input,
+button,
+textarea,
+select {
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid #374151;
+  background: #0f172a;
+  color: #e5e7eb;
+  padding: 10px;
+}
+
+button {
+  cursor: pointer;
+}
+
+button:hover {
+  background: #162033;
+}
+
+.button-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.two-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.muted {
+  color: #94a3b8;
+  font-size: 14px;
+}
+
+#draftMetrics {
+  white-space: pre-wrap;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  background: #0f172a;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  padding: 10px;
+  color: #cbd5e1;
+}
+
+#promptView {
+  width: 100%;
+  min-height: 220px;
+  resize: vertical;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+#metadataView {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+ul {
+  margin: 8px 0 0 18px;
+  padding: 0;
+}

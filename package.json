@@ -2,12 +2,14 @@
   "name": "tactical-map-editor",
   "version": "0.1.0",
   "private": true,
-  "type": "commonjs",
+  "description": "Minimal tactical map metadata editor MVP",
+  "main": "server.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "node server.js"
+    "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.19.2"
+    "express": "^4.19.2",
+    "multer": "^1.4.5-lts.1",
+    "openai": "^4.104.0"
   }
 }
