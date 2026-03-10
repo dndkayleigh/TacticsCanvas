@@ -6,6 +6,10 @@ This project is **not** a virtual tabletop. It is a companion tool for preparing
 
 The current MVP focuses on a single tactical layer: **blocking / impassable tiles**.
 
+<img width="1905" height="983" alt="image" src="https://github.com/user-attachments/assets/670fff87-a616-444d-b48b-5ce6d274d40b" />
+**Tactical Map Metadata Editor interface.** The web-based editor displays a battle map on the right with a square grid and a semi-transparent red overlay marking tiles labeled as blocking or impassable. The left control panel supports map upload, OpenAI model selection, AI-assisted metadata drafting, and JSON save/export, while a live metadata viewer below shows the current map schema, grid calibration, and blocking layer. This interface is designed for human-in-the-loop review and correction of AI-generated tactical map metadata before downstream use in a virtual tabletop system.
+
+
 ## Why this exists
 
 Most digital battle maps are just images. They look great, but they do not encode tactical information like:
