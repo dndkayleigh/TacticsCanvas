@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Tactical Map Editor</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Tactical Map Metadata Editor</h1>
+        <p>Node backend + plain browser frontend</p>
+      </div>
+      <div class="topbar-actions">
+        <button id="validateBtn">Validate</button>
+        <button id="downloadBtn">Download JSON</button>
+        <button id="serverExportBtn">Save via Server</button>
+      </div>
+    </header>
+
+    <main class="layout">
+      <aside class="sidebar">
+        <section class="panel">
+          <h2>Map</h2>
+          <label>
+            Upload map image
+            <input id="mapFileInput" type="file" accept="image/*" />
+          </label>
+          <div class="meta-block">
+            <div><strong>Name:</strong> <span id="mapName">untitled-map.png</span></div>
+            <div><strong>Size:</strong> <span id="mapSize">960 × 640</span></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Grid</h2>
+          <label>
+            Tile size (px)
+            <input id="tileSizeInput" type="number" min="1" value="70" />
+          </label>
+          <label>
+            Origin X
+            <input id="originXInput" type="number" value="0" />
+          </label>
+          <label>
+            Origin Y
+            <input id="originYInput" type="number" value="0" />
+          </label>
+          <div class="meta-block">
+            <div><strong>Grid:</strong> <span id="gridDims">13 × 9</span></div>
+          </div>
+          <button id="resetBtn">Reset Metadata</button>
+        </section>
+
+        <section class="panel">
+          <h2>Tools</h2>
+          <label>
+            Tool
+            <select id="toolSelect">
+              <option value="paint">Paint Tiles</option>
+              <option value="erase">Erase Tiles</option>
+              <option value="edge">Draw Edges</option>
+              <option value="edge_erase">Erase Edges</option>
+              <option value="object">Place Objects</option>
+              <option value="object_erase">Erase Objects</option>
+            </select>
+          </label>
+          <label>
+            Tile brush
+            <select id="tileBrushSelect"></select>
+          </label>
+          <label>
+            Edge brush
+            <select id="edgeBrushSelect"></select>
+          </label>
+          <label>
+            Object brush
+            <select id="objectBrushSelect"></select>
+          </label>
+        </section>
+
+        <section class="panel">
+          <h2>Display</h2>
+          <label class="checkbox-row"><input id="showGridInput" type="checkbox" checked /> Show grid</label>
+          <label class="checkbox-row"><input id="showTilesInput" type="checkbox" checked /> Show tile overlays</label>
+          <label class="checkbox-row"><input id="showEdgesInput" type="checkbox" checked /> Show edges</label>
+          <label class="checkbox-row"><input id="showObjectsInput" type="checkbox" checked /> Show objects</label>
+          <label class="checkbox-row"><input id="showLabelsInput" type="checkbox" checked /> Show labels</label>
+        </section>
+
+        <section class="panel">
+          <h2>Validation</h2>
+          <div id="validationBox" class="status-box">Not validated yet.</div>
+        </section>
+      </aside>
+
+      <section class="main-panel">
+        <div class="canvas-wrap">
+          <img id="hiddenMapImage" alt="map" hidden />
+          <canvas id="mapCanvas" width="960" height="640"></canvas>
+        </div>
+
+        <div class="bottom-grid">
+          <section class="panel">
+            <h2>Objects</h2>
+            <div id="objectList" class="object-list"></div>
+          </section>
+
+          <section class="panel">
+            <h2>Metadata Preview</h2>
+            <pre id="metadataPreview" class="preview"></pre>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>
