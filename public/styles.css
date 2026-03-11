@@ -64,11 +64,15 @@ body {
   width: 100%;
   height: 100%;
   display: block;
-  cursor: grab;
+  cursor: crosshair;
 }
 
 #mapCanvas.dragging {
   cursor: grabbing;
+}
+
+#mapCanvas.pan-mode {
+  cursor: grab;
 }
 
 h1,
@@ -119,12 +123,28 @@ button:hover {
   gap: 8px;
 }
 
+.three-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 8px;
+}
+
+.top-gap {
+  margin-top: 8px;
+}
+
+.mode-btn.active {
+  background: #1d4ed8;
+  border-color: #60a5fa;
+}
+
 .muted {
   color: #94a3b8;
   font-size: 14px;
 }
 
-#draftMetrics {
+#draftMetrics,
+#cursorInfo {
   white-space: pre-wrap;
   font-family: Consolas, Monaco, monospace;
   font-size: 12px;

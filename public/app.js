@@ -6,8 +6,15 @@ const draftAiBtn = document.getElementById("draftAiBtn");
 const modelSelect = document.getElementById("modelSelect");
 const saveBtn = document.getElementById("saveBtn");
 const exportBtn = document.getElementById("exportBtn");
+const undoBtn = document.getElementById("undoBtn");
+const redoBtn = document.getElementById("redoBtn");
+const fitViewBtn = document.getElementById("fitViewBtn");
+const modePaintBtn = document.getElementById("modePaintBtn");
+const modeEraseBtn = document.getElementById("modeEraseBtn");
+const modePanBtn = document.getElementById("modePanBtn");
 const statusEl = document.getElementById("status");
 const draftMetricsEl = document.getElementById("draftMetrics");
+const cursorInfoEl = document.getElementById("cursorInfo");
 const promptView = document.getElementById("promptView");
 const metadataView = document.getElementById("metadataView");
 const canvas = document.getElementById("mapCanvas");
@@ -35,6 +42,12 @@ const state = {
   dragViewY: 0,
   lastDraftLog: null,
   lastDraftPrompt: "",
+  toolMode: "paint", // paint | erase | pan
+  spacePan: false,
+  paintDragging: false,
+  hoverTile: null,
+  historyUndo: [],
+  historyRedo: [],
 };
 
 function clamp(n, min, max) {
@@ -43,6 +56,10 @@ function clamp(n, min, max) {
 
 function makeBlockingGrid(rows, cols, fill = false) {
   return Array.from({ length: rows }, () => Array.from({ length: cols }, () => fill));
+}
+
+function deepCopyGrid(grid) {
+  return grid.map((row) => [...row]);
 }
 
 function computeDefaultGridForImage(imageWidth, imageHeight) {
@@ -183,6 +200,34 @@ function renderDraftMetrics() {
   ].join("\n");
 }
 
+function renderModeButtons() {
+  modePaintBtn.classList.toggle("active", state.toolMode === "paint");
+  modeEraseBtn.classList.toggle("active", state.toolMode === "erase");
+  modePanBtn.classList.toggle("active", state.toolMode === "pan");
+
+  if (state.toolMode === "pan" || state.spacePan) {
+    canvas.classList.add("pan-mode");
+  } else {
+    canvas.classList.remove("pan-mode");
+  }
+}
+
+function renderCursorInfo() {
+  if (!state.hoverTile) {
+    cursorInfoEl.textContent = "No tile selected.";
+    return;
+  }
+
+  const { r, c } = state.hoverTile;
+  const blocking = state.metadata?.layers?.blocking?.[r]?.[c] ? "true" : "false";
+  cursorInfoEl.textContent = [
+    `Row: ${r}`,
+    `Col: ${c}`,
+    `Blocking: ${blocking}`,
+    `Mode: ${state.toolMode}`,
+  ].join("\n");
+}
+
 function syncMetadata() {
   if (!state.metadata) {
     state.metadata = buildBlankMetadata();
@@ -237,6 +282,8 @@ function syncMetadata() {
   statusEl.textContent = `${state.imageName} • ${state.imageWidth}x${state.imageHeight} • rows ${state.rows} • cols ${state.cols} • tile ${state.tileSize}px`;
   renderDraftMetrics();
   renderPromptView();
+  renderModeButtons();
+  renderCursorInfo();
 }
 
 function applyMetadataFromTextArea() {
@@ -289,6 +336,45 @@ function screenToImage(x, y) {
     x: (x - state.viewX) / state.viewScale,
     y: (y - state.viewY) / state.viewScale,
   };
+}
+
+function pushHistory() {
+  const grid = state.metadata?.layers?.blocking;
+  if (!grid) return;
+
+  state.historyUndo.push(deepCopyGrid(grid));
+  if (state.historyUndo.length > 100) {
+    state.historyUndo.shift();
+  }
+  state.historyRedo = [];
+}
+
+function undo() {
+  if (!state.historyUndo.length || !state.metadata?.layers?.blocking) return;
+  state.historyRedo.push(deepCopyGrid(state.metadata.layers.blocking));
+  state.metadata.layers.blocking = state.historyUndo.pop();
+  syncMetadata();
+  draw();
+}
+
+function redo() {
+  if (!state.historyRedo.length || !state.metadata?.layers?.blocking) return;
+  state.historyUndo.push(deepCopyGrid(state.metadata.layers.blocking));
+  state.metadata.layers.blocking = state.historyRedo.pop();
+  syncMetadata();
+  draw();
+}
+
+function fitView() {
+  if (!state.imageLoaded) return;
+
+  const padding = 20;
+  const scaleX = (canvas.width - padding * 2) / state.imageWidth;
+  const scaleY = (canvas.height - padding * 2) / state.imageHeight;
+  state.viewScale = Math.max(0.1, Math.min(scaleX, scaleY));
+  state.viewX = (canvas.width - state.imageWidth * state.viewScale) / 2;
+  state.viewY = (canvas.height - state.imageHeight * state.viewScale) / 2;
+  draw();
 }
 
 function draw() {
@@ -350,6 +436,17 @@ function draw() {
       ctx.strokeRect(p.x, p.y, size, size);
     }
   }
+
+  if (state.hoverTile) {
+    const { r, c } = state.hoverTile;
+    const x = c * state.tileSize;
+    const y = state.imageHeight - (r + 1) * state.tileSize;
+    const p = imageToScreen(x, y);
+    const size = state.tileSize * state.viewScale;
+    ctx.strokeStyle = "rgba(255,255,0,0.95)";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x, p.y, size, size);
+  }
 }
 
 function syncFromGridDims(nextRows, nextCols) {
@@ -390,8 +487,15 @@ function getTileAtClientPoint(clientX, clientY) {
   return { r, c };
 }
 
-function toggleBlockingTile(r, c) {
-  state.metadata.layers.blocking[r][c] = !state.metadata.layers.blocking[r][c];
+function applyToolAtTile(r, c) {
+  if (!state.metadata?.layers?.blocking) return;
+
+  const current = state.metadata.layers.blocking[r][c];
+  const nextValue = state.toolMode === "erase" ? false : true;
+
+  if (current === nextValue) return;
+
+  state.metadata.layers.blocking[r][c] = nextValue;
   syncMetadata();
   draw();
 }
@@ -510,6 +614,20 @@ async function uploadMapFile(file) {
   return data;
 }
 
+function beginPan(clientX, clientY) {
+  state.dragging = true;
+  canvas.classList.add("dragging");
+  state.dragStartX = clientX;
+  state.dragStartY = clientY;
+  state.dragViewX = state.viewX;
+  state.dragViewY = state.viewY;
+}
+
+function endPan() {
+  state.dragging = false;
+  canvas.classList.remove("dragging");
+}
+
 imageInput.addEventListener("change", async (e) => {
   const file = e.target.files?.[0];
   if (!file) return;
@@ -545,11 +663,9 @@ imageInput.addEventListener("change", async (e) => {
 
     hiddenImage.onload = () => {
       state.imageLoaded = true;
-      state.viewScale = 1;
-      state.viewX = 20;
-      state.viewY = 20;
+      state.hoverTile = null;
       syncMetadata();
-      draw();
+      fitView();
       statusEl.textContent = data.sidecarFound
         ? `Loaded ${state.imageName} with existing sidecar metadata.`
         : `Loaded ${state.imageName}; created blank sidecar metadata.`;
@@ -572,7 +688,23 @@ colsInput.addEventListener("change", () => {
 exportBtn.addEventListener("click", exportMetadata);
 saveBtn.addEventListener("click", saveMetadata);
 draftAiBtn.addEventListener("click", draftAi);
+undoBtn.addEventListener("click", undo);
+redoBtn.addEventListener("click", redo);
+fitViewBtn.addEventListener("click", fitView);
 metadataView.addEventListener("change", applyMetadataFromTextArea);
+
+modePaintBtn.addEventListener("click", () => {
+  state.toolMode = "paint";
+  renderModeButtons();
+});
+modeEraseBtn.addEventListener("click", () => {
+  state.toolMode = "erase";
+  renderModeButtons();
+});
+modePanBtn.addEventListener("click", () => {
+  state.toolMode = "pan";
+  renderModeButtons();
+});
 
 modelSelect.addEventListener("change", () => {
   state.selectedModel = modelSelect.value;
@@ -586,38 +718,58 @@ modelSelect.addEventListener("change", () => {
 canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("mousedown", (e) => {
-  if (e.button === 0) {
-    state.dragging = true;
-    canvas.classList.add("dragging");
-    state.dragStartX = e.clientX;
-    state.dragStartY = e.clientY;
-    state.dragViewX = state.viewX;
-    state.dragViewY = state.viewY;
+  const tile = getTileAtClientPoint(e.clientX, e.clientY);
+  state.hoverTile = tile;
+  renderCursorInfo();
+
+  const wantsPan = state.toolMode === "pan" || state.spacePan;
+
+  if (e.button === 0 && wantsPan) {
+    beginPan(e.clientX, e.clientY);
+    return;
   }
 
-  if (e.button === 2 && state.metadata) {
-    const tile = getTileAtClientPoint(e.clientX, e.clientY);
-    if (tile) toggleBlockingTile(tile.r, tile.c);
+  if (e.button === 0 && !wantsPan && (state.toolMode === "paint" || state.toolMode === "erase")) {
+    if (!tile) return;
+    pushHistory();
+    state.paintDragging = true;
+    applyToolAtTile(tile.r, tile.c);
   }
 });
 
 canvas.addEventListener("mousemove", (e) => {
-  if (!state.dragging) return;
-  const dx = e.clientX - state.dragStartX;
-  const dy = e.clientY - state.dragStartY;
-  state.viewX = state.dragViewX + dx;
-  state.viewY = state.dragViewY + dy;
+  const tile = getTileAtClientPoint(e.clientX, e.clientY);
+  state.hoverTile = tile;
+  renderCursorInfo();
+
+  if (state.dragging) {
+    const dx = e.clientX - state.dragStartX;
+    const dy = e.clientY - state.dragStartY;
+    state.viewX = state.dragViewX + dx;
+    state.viewY = state.dragViewY + dy;
+    draw();
+    return;
+  }
+
+  if (state.paintDragging && tile) {
+    applyToolAtTile(tile.r, tile.c);
+    return;
+  }
+
   draw();
 });
 
 window.addEventListener("mouseup", () => {
-  state.dragging = false;
-  canvas.classList.remove("dragging");
+  endPan();
+  state.paintDragging = false;
 });
 
 canvas.addEventListener("mouseleave", () => {
-  state.dragging = false;
-  canvas.classList.remove("dragging");
+  endPan();
+  state.paintDragging = false;
+  state.hoverTile = null;
+  renderCursorInfo();
+  draw();
 });
 
 canvas.addEventListener(
@@ -638,7 +790,50 @@ canvas.addEventListener(
   { passive: false }
 );
 
-window.addEventListener("resize", draw);
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Space") {
+    state.spacePan = true;
+    renderModeButtons();
+    e.preventDefault();
+  }
+
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "z") {
+    e.preventDefault();
+    undo();
+    return;
+  }
+
+  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) {
+    e.preventDefault();
+    redo();
+    return;
+  }
+
+  if (e.key.toLowerCase() === "p") {
+    state.toolMode = "paint";
+    renderModeButtons();
+  } else if (e.key.toLowerCase() === "e") {
+    state.toolMode = "erase";
+    renderModeButtons();
+  } else if (e.key.toLowerCase() === "h") {
+    state.toolMode = "pan";
+    renderModeButtons();
+  }
+});
+
+window.addEventListener("keyup", (e) => {
+  if (e.code === "Space") {
+    state.spacePan = false;
+    renderModeButtons();
+  }
+});
+
+window.addEventListener("resize", () => {
+  draw();
+  if (state.imageLoaded) {
+    renderModeButtons();
+  }
+});
 
 const initialDefault = computeDefaultGridForImage(state.imageWidth, state.imageHeight);
 state.rows = initialDefault.rows;
