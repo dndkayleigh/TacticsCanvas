@@ -4,6 +4,7 @@ const rowsInput = document.getElementById("rowsInput");
 const colsInput = document.getElementById("colsInput");
 const draftAiBtn = document.getElementById("draftAiBtn");
 const modelSelect = document.getElementById("modelSelect");
+const overlayModeSelect = document.getElementById("overlayModeSelect");
 const saveBtn = document.getElementById("saveBtn");
 const exportBtn = document.getElementById("exportBtn");
 const undoBtn = document.getElementById("undoBtn");
@@ -12,18 +13,23 @@ const fitViewBtn = document.getElementById("fitViewBtn");
 const prevCaseBtn = document.getElementById("prevCaseBtn");
 const nextCaseBtn = document.getElementById("nextCaseBtn");
 const saveNextBtn = document.getElementById("saveNextBtn");
+
 const modePaintBtn = document.getElementById("modePaintBtn");
 const modeEraseBtn = document.getElementById("modeEraseBtn");
+const modeAmbiguousBtn = document.getElementById("modeAmbiguousBtn");
 const modePanBtn = document.getElementById("modePanBtn");
+
 const labelerInput = document.getElementById("labelerInput");
 const reviewStatusSelect = document.getElementById("reviewStatusSelect");
 const notesInput = document.getElementById("notesInput");
+
 const statusEl = document.getElementById("status");
 const draftMetricsEl = document.getElementById("draftMetrics");
 const cursorInfoEl = document.getElementById("cursorInfo");
 const caseInfoEl = document.getElementById("caseInfo");
 const promptView = document.getElementById("promptView");
 const metadataView = document.getElementById("metadataView");
+
 const canvas = document.getElementById("mapCanvas");
 const ctx = canvas.getContext("2d");
 const hiddenImage = document.getElementById("hiddenImage");
@@ -34,27 +40,37 @@ const state = {
   imageHeight: 800,
   imageLoaded: false,
   imageUrl: null,
+
   tileSize: 30,
   rows: 27,
   cols: 40,
+
   selectedModel: "gpt-4-mini",
+  overlayMode: "human",
+
   metadata: null,
+
   viewScale: 1,
   viewX: 20,
   viewY: 20,
+
   dragging: false,
   dragStartX: 0,
   dragStartY: 0,
   dragViewX: 0,
   dragViewY: 0,
+
   lastDraftLog: null,
   lastDraftPrompt: "",
-  toolMode: "paint",
+
+  toolMode: "paint", // paint | erase | ambiguous | pan
   spacePan: false,
   paintDragging: false,
   hoverTile: null,
+
   historyUndo: [],
   historyRedo: [],
+
   mapList: [],
   currentMapIndex: -1,
 };
@@ -63,7 +79,7 @@ function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
 }
 
-function makeBlockingGrid(rows, cols, fill = false) {
+function makeGrid(rows, cols, fill = false) {
   return Array.from({ length: rows }, () => Array.from({ length: cols }, () => fill));
 }
 
@@ -104,6 +120,16 @@ function computeTileSizeFromGrid(imageWidth, imageHeight, rows, cols) {
   return Math.max(1, Math.round((sizeFromCols + sizeFromRows) / 2));
 }
 
+function resizeGrid(prevGrid, rows, cols) {
+  const next = makeGrid(rows, cols, false);
+  for (let r = 0; r < Math.min(rows, prevGrid.length); r++) {
+    for (let c = 0; c < Math.min(cols, prevGrid[r]?.length || 0); c++) {
+      next[r][c] = Boolean(prevGrid[r][c]);
+    }
+  }
+  return next;
+}
+
 function buildBlankMetadata() {
   const fitted = computeDefaultGridForImage(state.imageWidth, state.imageHeight);
   const tileSize = computeTileSizeFromGrid(
@@ -134,7 +160,9 @@ function buildBlankMetadata() {
       cols: state.cols,
     },
     layers: {
-      blocking: makeBlockingGrid(state.rows, state.cols, false),
+      blocking: makeGrid(state.rows, state.cols, false),
+      ai_blocking: makeGrid(state.rows, state.cols, false),
+      ambiguous: makeGrid(state.rows, state.cols, false),
     },
     ai_annotation: {
       status: "none",
@@ -155,16 +183,6 @@ function buildBlankMetadata() {
       notes: "",
     },
   };
-}
-
-function resizeBlockingGrid(prevGrid, rows, cols) {
-  const next = makeBlockingGrid(rows, cols, false);
-  for (let r = 0; r < Math.min(rows, prevGrid.length); r++) {
-    for (let c = 0; c < Math.min(cols, prevGrid[r]?.length || 0); c++) {
-      next[r][c] = prevGrid[r][c];
-    }
-  }
-  return next;
 }
 
 function buildClientPromptPreview() {
@@ -224,6 +242,7 @@ function renderDraftMetrics() {
 function renderModeButtons() {
   modePaintBtn.classList.toggle("active", state.toolMode === "paint");
   modeEraseBtn.classList.toggle("active", state.toolMode === "erase");
+  modeAmbiguousBtn.classList.toggle("active", state.toolMode === "ambiguous");
   modePanBtn.classList.toggle("active", state.toolMode === "pan");
 
   if (state.toolMode === "pan" || state.spacePan) {
@@ -240,12 +259,18 @@ function renderCursorInfo() {
   }
 
   const { r, c } = state.hoverTile;
-  const blocking = state.metadata?.layers?.blocking?.[r]?.[c] ? "true" : "false";
+  const human = state.metadata?.layers?.blocking?.[r]?.[c] ? "true" : "false";
+  const ai = state.metadata?.layers?.ai_blocking?.[r]?.[c] ? "true" : "false";
+  const ambiguous = state.metadata?.layers?.ambiguous?.[r]?.[c] ? "true" : "false";
+
   cursorInfoEl.textContent = [
     `Row: ${r}`,
     `Col: ${c}`,
-    `Blocking: ${blocking}`,
+    `Human: ${human}`,
+    `AI: ${ai}`,
+    `Ambiguous: ${ambiguous}`,
     `Mode: ${state.toolMode}`,
+    `Overlay: ${state.overlayMode}`,
   ].join("\n");
 }
 
@@ -320,8 +345,18 @@ function syncMetadata() {
   };
 
   state.metadata.layers ||= {};
-  state.metadata.layers.blocking = resizeBlockingGrid(
+  state.metadata.layers.blocking = resizeGrid(
     state.metadata.layers.blocking || [],
+    state.rows,
+    state.cols
+  );
+  state.metadata.layers.ai_blocking = resizeGrid(
+    state.metadata.layers.ai_blocking || [],
+    state.rows,
+    state.cols
+  );
+  state.metadata.layers.ambiguous = resizeGrid(
+    state.metadata.layers.ambiguous || [],
     state.rows,
     state.cols
   );
@@ -336,6 +371,7 @@ function syncMetadata() {
   rowsInput.value = state.rows;
   colsInput.value = state.cols;
   tileSizeInput.value = state.tileSize;
+  overlayModeSelect.value = state.overlayMode;
 
   statusEl.textContent = `${state.imageName} • ${state.imageWidth}x${state.imageHeight} • rows ${state.rows} • cols ${state.cols} • tile ${state.tileSize}px`;
   renderDraftMetrics();
@@ -399,10 +435,13 @@ function screenToImage(x, y) {
 }
 
 function pushHistory() {
-  const grid = state.metadata?.layers?.blocking;
-  if (!grid) return;
+  if (!state.metadata?.layers) return;
 
-  state.historyUndo.push(deepCopyGrid(grid));
+  state.historyUndo.push({
+    blocking: deepCopyGrid(state.metadata.layers.blocking || []),
+    ambiguous: deepCopyGrid(state.metadata.layers.ambiguous || []),
+  });
+
   if (state.historyUndo.length > 100) {
     state.historyUndo.shift();
   }
@@ -410,17 +449,31 @@ function pushHistory() {
 }
 
 function undo() {
-  if (!state.historyUndo.length || !state.metadata?.layers?.blocking) return;
-  state.historyRedo.push(deepCopyGrid(state.metadata.layers.blocking));
-  state.metadata.layers.blocking = state.historyUndo.pop();
+  if (!state.historyUndo.length || !state.metadata?.layers) return;
+
+  state.historyRedo.push({
+    blocking: deepCopyGrid(state.metadata.layers.blocking || []),
+    ambiguous: deepCopyGrid(state.metadata.layers.ambiguous || []),
+  });
+
+  const prev = state.historyUndo.pop();
+  state.metadata.layers.blocking = prev.blocking;
+  state.metadata.layers.ambiguous = prev.ambiguous;
   syncMetadata();
   draw();
 }
 
 function redo() {
-  if (!state.historyRedo.length || !state.metadata?.layers?.blocking) return;
-  state.historyUndo.push(deepCopyGrid(state.metadata.layers.blocking));
-  state.metadata.layers.blocking = state.historyRedo.pop();
+  if (!state.historyRedo.length || !state.metadata?.layers) return;
+
+  state.historyUndo.push({
+    blocking: deepCopyGrid(state.metadata.layers.blocking || []),
+    ambiguous: deepCopyGrid(state.metadata.layers.ambiguous || []),
+  });
+
+  const next = state.historyRedo.pop();
+  state.metadata.layers.blocking = next.blocking;
+  state.metadata.layers.ambiguous = next.ambiguous;
   syncMetadata();
   draw();
 }
@@ -428,6 +481,7 @@ function redo() {
 function fitView() {
   if (!state.imageLoaded) return;
 
+  sizeCanvas();
   const padding = 20;
   const scaleX = (canvas.width - padding * 2) / state.imageWidth;
   const scaleY = (canvas.height - padding * 2) / state.imageHeight;
@@ -435,6 +489,24 @@ function fitView() {
   state.viewX = (canvas.width - state.imageWidth * state.viewScale) / 2;
   state.viewY = (canvas.height - state.imageHeight * state.viewScale) / 2;
   draw();
+}
+
+function drawTileRect(r, c, fillStyle, strokeStyle = null, lineWidth = 1) {
+  const x = c * state.tileSize;
+  const y = state.imageHeight - (r + 1) * state.tileSize;
+  const p = imageToScreen(x, y);
+  const size = state.tileSize * state.viewScale;
+
+  if (fillStyle) {
+    ctx.fillStyle = fillStyle;
+    ctx.fillRect(p.x, p.y, size, size);
+  }
+
+  if (strokeStyle) {
+    ctx.strokeStyle = strokeStyle;
+    ctx.lineWidth = lineWidth;
+    ctx.strokeRect(p.x, p.y, size, size);
+  }
 }
 
 function draw() {
@@ -482,30 +554,52 @@ function draw() {
     ctx.stroke();
   }
 
-  const blocking = state.metadata?.layers?.blocking || [];
+  const human = state.metadata?.layers?.blocking || [];
+  const ai = state.metadata?.layers?.ai_blocking || [];
+  const ambiguous = state.metadata?.layers?.ambiguous || [];
+
   for (let r = 0; r < state.rows; r++) {
     for (let c = 0; c < state.cols; c++) {
-      if (!blocking[r]?.[c]) continue;
-      const x = c * state.tileSize;
-      const y = state.imageHeight - (r + 1) * state.tileSize;
-      const p = imageToScreen(x, y);
-      const size = state.tileSize * state.viewScale;
-      ctx.fillStyle = "rgba(220,38,38,0.38)";
-      ctx.strokeStyle = "rgba(220,38,38,1)";
-      ctx.fillRect(p.x, p.y, size, size);
-      ctx.strokeRect(p.x, p.y, size, size);
+      const humanVal = Boolean(human[r]?.[c]);
+      const aiVal = Boolean(ai[r]?.[c]);
+      const ambiguousVal = Boolean(ambiguous[r]?.[c]);
+
+      if (state.overlayMode === "human") {
+        if (humanVal) {
+          drawTileRect(r, c, "rgba(220,38,38,0.38)", "rgba(220,38,38,1)");
+        }
+      } else if (state.overlayMode === "ai") {
+        if (aiVal) {
+          drawTileRect(r, c, "rgba(249,115,22,0.38)", "rgba(249,115,22,1)");
+        }
+      } else if (state.overlayMode === "diff") {
+        if (humanVal && aiVal) {
+          drawTileRect(r, c, "rgba(220,38,38,0.30)", "rgba(220,38,38,0.95)");
+        } else if (aiVal && !humanVal) {
+          drawTileRect(r, c, "rgba(249,115,22,0.40)", "rgba(249,115,22,1)");
+        } else if (humanVal && !aiVal) {
+          drawTileRect(r, c, "rgba(59,130,246,0.40)", "rgba(59,130,246,1)");
+        }
+      } else if (state.overlayMode === "ambiguous") {
+        if (ambiguousVal) {
+          drawTileRect(r, c, "rgba(168,85,247,0.38)", "rgba(168,85,247,1)");
+        }
+      } else if (state.overlayMode === "all") {
+        if (humanVal) {
+          drawTileRect(r, c, "rgba(220,38,38,0.28)", null);
+        }
+        if (aiVal && !humanVal) {
+          drawTileRect(r, c, "rgba(249,115,22,0.28)", null);
+        }
+        if (ambiguousVal) {
+          drawTileRect(r, c, null, "rgba(168,85,247,1)", 2);
+        }
+      }
     }
   }
 
   if (state.hoverTile) {
-    const { r, c } = state.hoverTile;
-    const x = c * state.tileSize;
-    const y = state.imageHeight - (r + 1) * state.tileSize;
-    const p = imageToScreen(x, y);
-    const size = state.tileSize * state.viewScale;
-    ctx.strokeStyle = "rgba(255,255,0,0.95)";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(p.x, p.y, size, size);
+    drawTileRect(state.hoverTile.r, state.hoverTile.c, null, "rgba(255,255,0,0.95)", 2);
   }
 }
 
@@ -548,14 +642,22 @@ function getTileAtClientPoint(clientX, clientY) {
 }
 
 function applyToolAtTile(r, c) {
-  if (!state.metadata?.layers?.blocking) return;
+  if (!state.metadata?.layers) return;
 
-  const current = state.metadata.layers.blocking[r][c];
-  const nextValue = state.toolMode === "erase" ? false : true;
+  if (state.toolMode === "paint") {
+    const current = state.metadata.layers.blocking[r][c];
+    if (current === true) return;
+    state.metadata.layers.blocking[r][c] = true;
+  } else if (state.toolMode === "erase") {
+    const current = state.metadata.layers.blocking[r][c];
+    if (current === false) return;
+    state.metadata.layers.blocking[r][c] = false;
+  } else if (state.toolMode === "ambiguous") {
+    state.metadata.layers.ambiguous[r][c] = !state.metadata.layers.ambiguous[r][c];
+  } else {
+    return;
+  }
 
-  if (current === nextValue) return;
-
-  state.metadata.layers.blocking[r][c] = nextValue;
   syncMetadata();
   draw();
 }
@@ -824,25 +926,41 @@ notesInput.addEventListener("input", () => {
   metadataView.value = JSON.stringify(state.metadata, null, 2);
 });
 
+overlayModeSelect.addEventListener("change", () => {
+  state.overlayMode = overlayModeSelect.value;
+  renderCursorInfo();
+  draw();
+});
+
 exportBtn.addEventListener("click", exportMetadata);
 saveBtn.addEventListener("click", () => saveMetadata());
 saveNextBtn.addEventListener("click", () => saveAndNext());
 draftAiBtn.addEventListener("click", draftAi);
+
 undoBtn.addEventListener("click", undo);
 redoBtn.addEventListener("click", redo);
 fitViewBtn.addEventListener("click", fitView);
+
 prevCaseBtn.addEventListener("click", () => goToRelativeCase(-1));
 nextCaseBtn.addEventListener("click", () => goToRelativeCase(1));
+
 metadataView.addEventListener("change", applyMetadataFromTextArea);
 
 modePaintBtn.addEventListener("click", () => {
   state.toolMode = "paint";
   renderModeButtons();
 });
+
 modeEraseBtn.addEventListener("click", () => {
   state.toolMode = "erase";
   renderModeButtons();
 });
+
+modeAmbiguousBtn.addEventListener("click", () => {
+  state.toolMode = "ambiguous";
+  renderModeButtons();
+});
+
 modePanBtn.addEventListener("click", () => {
   state.toolMode = "pan";
   renderModeButtons();
@@ -871,7 +989,11 @@ canvas.addEventListener("mousedown", (e) => {
     return;
   }
 
-  if (e.button === 0 && !wantsPan && (state.toolMode === "paint" || state.toolMode === "erase")) {
+  if (
+    e.button === 0 &&
+    !wantsPan &&
+    (state.toolMode === "paint" || state.toolMode === "erase" || state.toolMode === "ambiguous")
+  ) {
     if (!tile) return;
     pushHistory();
     state.paintDragging = true;
@@ -894,7 +1016,17 @@ canvas.addEventListener("mousemove", (e) => {
   }
 
   if (state.paintDragging && tile) {
-    applyToolAtTile(tile.r, tile.c);
+    if (state.toolMode === "ambiguous") {
+      // For ambiguity mode, avoid flipping repeatedly while hovering same tile.
+      // Only toggle on initial click, then on entry to a new tile.
+      const last = state._lastPaintTile;
+      if (!last || last.r !== tile.r || last.c !== tile.c) {
+        applyToolAtTile(tile.r, tile.c);
+        state._lastPaintTile = tile;
+      }
+    } else {
+      applyToolAtTile(tile.r, tile.c);
+    }
     return;
   }
 
@@ -904,11 +1036,13 @@ canvas.addEventListener("mousemove", (e) => {
 window.addEventListener("mouseup", () => {
   endPan();
   state.paintDragging = false;
+  state._lastPaintTile = null;
 });
 
 canvas.addEventListener("mouseleave", () => {
   endPan();
   state.paintDragging = false;
+  state._lastPaintTile = null;
   state.hoverTile = null;
   renderCursorInfo();
   draw();
@@ -945,7 +1079,10 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
-  if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))) {
+  if (
+    (e.ctrlKey || e.metaKey) &&
+    (e.key.toLowerCase() === "y" || (e.shiftKey && e.key.toLowerCase() === "z"))
+  ) {
     e.preventDefault();
     redo();
     return;
@@ -962,6 +1099,9 @@ window.addEventListener("keydown", (e) => {
     renderModeButtons();
   } else if (e.key.toLowerCase() === "e") {
     state.toolMode = "erase";
+    renderModeButtons();
+  } else if (e.key.toLowerCase() === "u") {
+    state.toolMode = "ambiguous";
     renderModeButtons();
   } else if (e.key.toLowerCase() === "h") {
     state.toolMode = "pan";

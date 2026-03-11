@@ -120,11 +120,22 @@ function ensureMetadataShape(metadata, imageName, width, height) {
   };
 
   metadata.layers ||= {};
+
   const oldBlocking = metadata.layers.blocking || [];
-  const nextBlocking = Array.from({ length: bounded.rows }, (_, r) =>
+  const oldAiBlocking = metadata.layers.ai_blocking || [];
+  const oldAmbiguous = metadata.layers.ambiguous || [];
+
+  metadata.layers.blocking = Array.from({ length: bounded.rows }, (_, r) =>
     Array.from({ length: bounded.cols }, (_, c) => Boolean(oldBlocking[r]?.[c]))
   );
-  metadata.layers.blocking = nextBlocking;
+
+  metadata.layers.ai_blocking = Array.from({ length: bounded.rows }, (_, r) =>
+    Array.from({ length: bounded.cols }, (_, c) => Boolean(oldAiBlocking[r]?.[c]))
+  );
+
+  metadata.layers.ambiguous = Array.from({ length: bounded.rows }, (_, r) =>
+    Array.from({ length: bounded.cols }, (_, c) => Boolean(oldAmbiguous[r]?.[c]))
+  );
 
   metadata.ai_annotation ||= {
     status: "none",
@@ -396,7 +407,7 @@ app.post("/api/draft-blocking", async (req, res) => {
 
     const draft = await draftBlockingWithOpenAI({ metadata: normalized, model });
     const next = structuredClone(normalized);
-    next.layers.blocking = draft.blocking;
+    next.layers.ai_blocking = draft.blocking;
     next.ai_annotation = {
       status: "drafted",
       model: draft.apiModel,
