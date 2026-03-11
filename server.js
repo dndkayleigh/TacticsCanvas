@@ -32,10 +32,15 @@ function appendAiLog(entry) {
   fs.appendFileSync(AI_LOG_PATH, JSON.stringify(entry) + "\n", "utf8");
 }
 
-function countBlockingTiles(metadata) {
-  const grid = metadata?.layers?.blocking || [];
+function sidecarPathForImageName(imageName) {
+  const ext = path.extname(imageName);
+  const base = path.basename(imageName, ext);
+  return path.join(MAP_DIR, `${base}.tactical-map.json`);
+}
+
+function countTrue(grid) {
   let total = 0;
-  for (const row of grid) {
+  for (const row of grid || []) {
     for (const cell of row || []) {
       if (cell) total += 1;
     }
@@ -43,10 +48,40 @@ function countBlockingTiles(metadata) {
   return total;
 }
 
-function sidecarPathForImageName(imageName) {
-  const ext = path.extname(imageName);
-  const base = path.basename(imageName, ext);
-  return path.join(MAP_DIR, `${base}.tactical-map.json`);
+function countAiOnly(human, ai) {
+  let total = 0;
+  for (let r = 0; r < Math.max(human.length, ai.length); r++) {
+    const hr = human[r] || [];
+    const ar = ai[r] || [];
+    for (let c = 0; c < Math.max(hr.length, ar.length); c++) {
+      if (!Boolean(hr[c]) && Boolean(ar[c])) total += 1;
+    }
+  }
+  return total;
+}
+
+function countHumanOnly(human, ai) {
+  let total = 0;
+  for (let r = 0; r < Math.max(human.length, ai.length); r++) {
+    const hr = human[r] || [];
+    const ar = ai[r] || [];
+    for (let c = 0; c < Math.max(hr.length, ar.length); c++) {
+      if (Boolean(hr[c]) && !Boolean(ar[c])) total += 1;
+    }
+  }
+  return total;
+}
+
+function countAgreement(human, ai) {
+  let total = 0;
+  for (let r = 0; r < Math.max(human.length, ai.length); r++) {
+    const hr = human[r] || [];
+    const ar = ai[r] || [];
+    for (let c = 0; c < Math.max(hr.length, ar.length); c++) {
+      if (Boolean(hr[c]) === Boolean(ar[c])) total += 1;
+    }
+  }
+  return total;
 }
 
 function computeDefaultGridForImage(width, height) {
@@ -120,7 +155,6 @@ function ensureMetadataShape(metadata, imageName, width, height) {
   };
 
   metadata.layers ||= {};
-
   const oldBlocking = metadata.layers.blocking || [];
   const oldAiBlocking = metadata.layers.ai_blocking || [];
   const oldAmbiguous = metadata.layers.ambiguous || [];
@@ -308,6 +342,49 @@ app.get("/api/maps", (req, res) => {
   }
 });
 
+app.get("/api/case-summary", (req, res) => {
+  try {
+    const files = fs.readdirSync(MAP_DIR);
+    const imageFiles = files
+      .filter((name) => /\.(png|jpg|jpeg|webp|gif)$/i.test(name))
+      .sort((a, b) => a.localeCompare(b));
+
+    const summaries = imageFiles.map((imageName) => {
+      const sidecarPath = sidecarPathForImageName(imageName);
+      let metadata = ensureMetadataShape({}, imageName, 1200, 800);
+
+      if (fs.existsSync(sidecarPath)) {
+        const loaded = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+        const width = loaded?.map?.image_width_px || 1200;
+        const height = loaded?.map?.image_height_px || 800;
+        metadata = ensureMetadataShape(loaded, imageName, width, height);
+      }
+
+      const human = metadata.layers.blocking || [];
+      const ai = metadata.layers.ai_blocking || [];
+      const ambiguous = metadata.layers.ambiguous || [];
+
+      return {
+        imageName,
+        review_status: metadata.label_source?.review_status || "in_progress",
+        labeler: metadata.label_source?.labeler || "",
+        human_blocking_count: countTrue(human),
+        ai_blocking_count: countTrue(ai),
+        agreement_count: countAgreement(human, ai),
+        ai_only_count: countAiOnly(human, ai),
+        human_only_count: countHumanOnly(human, ai),
+        disagreement_count: countAiOnly(human, ai) + countHumanOnly(human, ai),
+        ambiguous_count: countTrue(ambiguous),
+      };
+    });
+
+    res.json({ cases: summaries });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to build case summary." });
+  }
+});
+
 app.post("/api/upload-map", upload.single("mapImage"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No image uploaded." });
@@ -430,7 +507,7 @@ app.post("/api/draft-blocking", async (req, res) => {
       input_tokens: usage.input_tokens ?? null,
       output_tokens: usage.output_tokens ?? null,
       total_tokens: usage.total_tokens ?? null,
-      blocking_tiles_after_draft: countBlockingTiles(next),
+      blocking_tiles_after_draft: countTrue(next.layers.ai_blocking || []),
       usage_source: "openai_response_usage",
     };
 

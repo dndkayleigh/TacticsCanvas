@@ -28,6 +28,36 @@
               <button id="nextCaseBtn">Next</button>
               <button id="saveNextBtn">Save + Next</button>
             </div>
+            <div class="two-col top-gap">
+              <button id="nextNeedsReviewBtn">Next Needs Review</button>
+              <button id="refreshDashboardBtn">Refresh Dashboard</button>
+            </div>
+          </section>
+
+          <section class="section">
+            <h2>Review Dashboard</h2>
+            <div class="two-col">
+              <div>
+                <label>Filter</label>
+                <select id="caseFilterSelect">
+                  <option value="all">All</option>
+                  <option value="in_progress">In Progress</option>
+                  <option value="needs_review">Needs Review</option>
+                  <option value="approved">Approved</option>
+                </select>
+              </div>
+              <div>
+                <label>Sort</label>
+                <select id="caseSortSelect">
+                  <option value="name">Name</option>
+                  <option value="disagreement">Disagreement</option>
+                  <option value="ambiguous">Ambiguous</option>
+                  <option value="review_status">Review Status</option>
+                </select>
+              </div>
+            </div>
+            <div id="summaryMetrics" class="top-gap">No summary loaded.</div>
+            <div id="caseList" class="top-gap case-list"></div>
           </section>
 
           <section class="section">
@@ -43,6 +73,14 @@
             <button id="draftAiBtn">Draft Metadata with AI</button>
             <button id="saveBtn">Save JSON</button>
             <button id="exportBtn">Export JSON</button>
+          </section>
+
+          <section class="section">
+            <h2>AI Review Actions</h2>
+            <div class="two-col">
+              <button id="acceptAiBtn">Accept AI Draft</button>
+              <button id="clearAiBtn">Clear AI Draft</button>
+            </div>
           </section>
 
           <section class="section">
@@ -95,6 +133,11 @@
 
             <label class="top-gap">Notes</label>
             <textarea id="notesInput" spellcheck="false"></textarea>
+          </section>
+
+          <section class="section">
+            <h2>Disagreement Metrics</h2>
+            <div id="mapMetrics">No map loaded.</div>
           </section>
 
           <section class="section">

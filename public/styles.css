@@ -15,7 +15,7 @@ body {
 
 #app {
   display: grid;
-  grid-template-columns: 380px 1fr;
+  grid-template-columns: 420px 1fr;
   gap: 12px;
   height: 100vh;
   padding: 12px;
@@ -129,6 +129,12 @@ button:hover {
   gap: 8px;
 }
 
+.four-col {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  gap: 8px;
+}
+
 .top-gap {
   margin-top: 8px;
 }
@@ -144,52 +150,10 @@ button:hover {
 }
 
 #caseInfo,
+#summaryMetrics,
+#mapMetrics,
 #draftMetrics,
-#cursorInfo {
-  white-space: pre-wrap;
-  font-family: Consolas, Monaco, monospace;
-  font-size: 12px;
-  line-height: 1.4;
-  background: #0f172a;
-  border: 1px solid #374151;
-  border-radius: 8px;
-  padding: 10px;
-  color: #cbd5e1;
-}
-
-#notesInput {
-  min-height: 120px;
-  resize: vertical;
-  font-family: Consolas, Monaco, monospace;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-#promptView {
-  width: 100%;
-  min-height: 220px;
-  resize: vertical;
-  font-family: Consolas, Monaco, monospace;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-#metadataView {
-  width: 100%;
-  flex: 1;
-  min-height: 0;
-  resize: none;
-  font-family: Consolas, Monaco, monospace;
-  font-size: 12px;
-  line-height: 1.4;
-}
-
-.four-col {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
-  gap: 8px;
-}
-
+#cursorInfo,
 #diffLegend {
   white-space: pre-wrap;
   font-family: Consolas, Monaco, monospace;
@@ -200,6 +164,68 @@ button:hover {
   border-radius: 8px;
   padding: 10px;
   color: #cbd5e1;
+}
+
+.case-list {
+  max-height: 240px;
+  overflow-y: auto;
+  border: 1px solid #374151;
+  border-radius: 8px;
+  background: #0f172a;
+}
+
+.case-list-item {
+  padding: 10px;
+  border-bottom: 1px solid #1f2937;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.case-list-item:last-child {
+  border-bottom: none;
+}
+
+.case-list-item:hover {
+  background: #162033;
+}
+
+.case-list-item.active {
+  background: #1d4ed8;
+}
+
+.case-list-title {
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+
+.case-list-meta {
+  color: #cbd5e1;
+  font-family: Consolas, Monaco, monospace;
+  white-space: pre-wrap;
+}
+
+#notesInput,
+#promptView {
+  min-height: 120px;
+  resize: vertical;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+#promptView {
+  min-height: 220px;
+}
+
+#metadataView {
+  width: 100%;
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 ul {

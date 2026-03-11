@@ -13,6 +13,10 @@ const fitViewBtn = document.getElementById("fitViewBtn");
 const prevCaseBtn = document.getElementById("prevCaseBtn");
 const nextCaseBtn = document.getElementById("nextCaseBtn");
 const saveNextBtn = document.getElementById("saveNextBtn");
+const nextNeedsReviewBtn = document.getElementById("nextNeedsReviewBtn");
+const refreshDashboardBtn = document.getElementById("refreshDashboardBtn");
+const acceptAiBtn = document.getElementById("acceptAiBtn");
+const clearAiBtn = document.getElementById("clearAiBtn");
 
 const modePaintBtn = document.getElementById("modePaintBtn");
 const modeEraseBtn = document.getElementById("modeEraseBtn");
@@ -22,6 +26,12 @@ const modePanBtn = document.getElementById("modePanBtn");
 const labelerInput = document.getElementById("labelerInput");
 const reviewStatusSelect = document.getElementById("reviewStatusSelect");
 const notesInput = document.getElementById("notesInput");
+
+const caseFilterSelect = document.getElementById("caseFilterSelect");
+const caseSortSelect = document.getElementById("caseSortSelect");
+const caseListEl = document.getElementById("caseList");
+const summaryMetricsEl = document.getElementById("summaryMetrics");
+const mapMetricsEl = document.getElementById("mapMetrics");
 
 const statusEl = document.getElementById("status");
 const draftMetricsEl = document.getElementById("draftMetrics");
@@ -63,16 +73,18 @@ const state = {
   lastDraftLog: null,
   lastDraftPrompt: "",
 
-  toolMode: "paint", // paint | erase | ambiguous | pan
+  toolMode: "paint",
   spacePan: false,
   paintDragging: false,
   hoverTile: null,
+  _lastPaintTile: null,
 
   historyUndo: [],
   historyRedo: [],
 
   mapList: [],
   currentMapIndex: -1,
+  caseSummaries: [],
 };
 
 function clamp(n, min, max) {
@@ -85,6 +97,52 @@ function makeGrid(rows, cols, fill = false) {
 
 function deepCopyGrid(grid) {
   return grid.map((row) => [...row]);
+}
+
+function countTrue(grid) {
+  let total = 0;
+  for (const row of grid || []) {
+    for (const cell of row || []) {
+      if (cell) total += 1;
+    }
+  }
+  return total;
+}
+
+function countAiOnly(human, ai) {
+  let total = 0;
+  for (let r = 0; r < Math.max(human.length, ai.length); r++) {
+    const hr = human[r] || [];
+    const ar = ai[r] || [];
+    for (let c = 0; c < Math.max(hr.length, ar.length); c++) {
+      if (!Boolean(hr[c]) && Boolean(ar[c])) total += 1;
+    }
+  }
+  return total;
+}
+
+function countHumanOnly(human, ai) {
+  let total = 0;
+  for (let r = 0; r < Math.max(human.length, ai.length); r++) {
+    const hr = human[r] || [];
+    const ar = ai[r] || [];
+    for (let c = 0; c < Math.max(hr.length, ar.length); c++) {
+      if (Boolean(hr[c]) && !Boolean(ar[c])) total += 1;
+    }
+  }
+  return total;
+}
+
+function countAgreement(human, ai) {
+  let total = 0;
+  for (let r = 0; r < Math.max(human.length, ai.length); r++) {
+    const hr = human[r] || [];
+    const ar = ai[r] || [];
+    for (let c = 0; c < Math.max(hr.length, ar.length); c++) {
+      if (Boolean(hr[c]) === Boolean(ar[c])) total += 1;
+    }
+  }
+  return total;
 }
 
 function computeDefaultGridForImage(imageWidth, imageHeight) {
@@ -286,6 +344,109 @@ function renderCaseInfo() {
   ].join("\n");
 }
 
+function renderMapMetrics() {
+  if (!state.metadata?.layers) {
+    mapMetricsEl.textContent = "No map loaded.";
+    return;
+  }
+
+  const human = state.metadata.layers.blocking || [];
+  const ai = state.metadata.layers.ai_blocking || [];
+  const ambiguous = state.metadata.layers.ambiguous || [];
+
+  const humanCount = countTrue(human);
+  const aiCount = countTrue(ai);
+  const aiOnly = countAiOnly(human, ai);
+  const humanOnly = countHumanOnly(human, ai);
+  const ambiguousCount = countTrue(ambiguous);
+  const disagreement = aiOnly + humanOnly;
+
+  mapMetricsEl.textContent = [
+    `Human blocking: ${humanCount}`,
+    `AI blocking: ${aiCount}`,
+    `AI only: ${aiOnly}`,
+    `Human only: ${humanOnly}`,
+    `Disagreement: ${disagreement}`,
+    `Ambiguous: ${ambiguousCount}`,
+  ].join("\n");
+}
+
+function getFilteredSortedCases() {
+  let rows = [...state.caseSummaries];
+
+  const filterValue = caseFilterSelect.value;
+  if (filterValue !== "all") {
+    rows = rows.filter((r) => r.review_status === filterValue);
+  }
+
+  const sortValue = caseSortSelect.value;
+  if (sortValue === "name") {
+    rows.sort((a, b) => a.imageName.localeCompare(b.imageName));
+  } else if (sortValue === "disagreement") {
+    rows.sort((a, b) => b.disagreement_count - a.disagreement_count || a.imageName.localeCompare(b.imageName));
+  } else if (sortValue === "ambiguous") {
+    rows.sort((a, b) => b.ambiguous_count - a.ambiguous_count || a.imageName.localeCompare(b.imageName));
+  } else if (sortValue === "review_status") {
+    rows.sort((a, b) => a.review_status.localeCompare(b.review_status) || a.imageName.localeCompare(b.imageName));
+  }
+
+  return rows;
+}
+
+function renderSummaryMetrics() {
+  if (!state.caseSummaries.length) {
+    summaryMetricsEl.textContent = "No summary loaded.";
+    return;
+  }
+
+  const total = state.caseSummaries.length;
+  const inProgress = state.caseSummaries.filter((c) => c.review_status === "in_progress").length;
+  const needsReview = state.caseSummaries.filter((c) => c.review_status === "needs_review").length;
+  const approved = state.caseSummaries.filter((c) => c.review_status === "approved").length;
+  const totalDisagreement = state.caseSummaries.reduce((sum, c) => sum + c.disagreement_count, 0);
+  const totalAmbiguous = state.caseSummaries.reduce((sum, c) => sum + c.ambiguous_count, 0);
+  const avgDisagreement = total ? (totalDisagreement / total).toFixed(1) : "0.0";
+
+  summaryMetricsEl.textContent = [
+    `Total maps: ${total}`,
+    `In Progress: ${inProgress}`,
+    `Needs Review: ${needsReview}`,
+    `Approved: ${approved}`,
+    `Avg disagreement: ${avgDisagreement}`,
+    `Total ambiguous: ${totalAmbiguous}`,
+  ].join("\n");
+}
+
+function renderCaseList() {
+  const rows = getFilteredSortedCases();
+  caseListEl.innerHTML = "";
+
+  if (!rows.length) {
+    caseListEl.innerHTML = `<div class="case-list-item"><div class="case-list-meta">No cases match current filter.</div></div>`;
+    return;
+  }
+
+  for (const row of rows) {
+    const item = document.createElement("div");
+    item.className = "case-list-item";
+    if (row.imageName === state.imageName) item.classList.add("active");
+
+    item.innerHTML = `
+      <div class="case-list-title">${row.imageName}</div>
+      <div class="case-list-meta">status=${row.review_status}
+labeler=${row.labeler || "-"}
+disagree=${row.disagreement_count}
+ambiguous=${row.ambiguous_count}</div>
+    `;
+
+    item.addEventListener("click", async () => {
+      await loadMapByName(row.imageName);
+    });
+
+    caseListEl.appendChild(item);
+  }
+}
+
 function syncWorkflowFieldsFromMetadata() {
   if (!state.metadata) return;
   labelerInput.value = state.metadata?.label_source?.labeler || "";
@@ -379,6 +540,9 @@ function syncMetadata() {
   renderModeButtons();
   renderCursorInfo();
   renderCaseInfo();
+  renderMapMetrics();
+  renderCaseList();
+  renderSummaryMetrics();
 }
 
 function applyMetadataFromTextArea() {
@@ -645,12 +809,10 @@ function applyToolAtTile(r, c) {
   if (!state.metadata?.layers) return;
 
   if (state.toolMode === "paint") {
-    const current = state.metadata.layers.blocking[r][c];
-    if (current === true) return;
+    if (state.metadata.layers.blocking[r][c] === true) return;
     state.metadata.layers.blocking[r][c] = true;
   } else if (state.toolMode === "erase") {
-    const current = state.metadata.layers.blocking[r][c];
-    if (current === false) return;
+    if (state.metadata.layers.blocking[r][c] === false) return;
     state.metadata.layers.blocking[r][c] = false;
   } else if (state.toolMode === "ambiguous") {
     state.metadata.layers.ambiguous[r][c] = !state.metadata.layers.ambiguous[r][c];
@@ -658,6 +820,27 @@ function applyToolAtTile(r, c) {
     return;
   }
 
+  syncMetadata();
+  draw();
+}
+
+function acceptAiDraft() {
+  if (!state.metadata?.layers?.ai_blocking) return;
+  const ok = window.confirm("Replace human blocking layer with the current AI draft?");
+  if (!ok) return;
+
+  pushHistory();
+  state.metadata.layers.blocking = deepCopyGrid(state.metadata.layers.ai_blocking);
+  syncMetadata();
+  draw();
+}
+
+function clearAiDraft() {
+  if (!state.metadata?.layers?.ai_blocking) return;
+  const ok = window.confirm("Clear the AI draft layer?");
+  if (!ok) return;
+
+  state.metadata.layers.ai_blocking = makeGrid(state.rows, state.cols, false);
   syncMetadata();
   draw();
 }
@@ -691,6 +874,7 @@ async function saveMetadata() {
     if (!res.ok) throw new Error(data.error || "Save failed");
     statusEl.textContent = `Saved ${state.imageName} metadata.`;
     metadataView.value = JSON.stringify(state.metadata, null, 2);
+    await fetchCaseSummary();
   } catch (err) {
     statusEl.textContent = `Save failed: ${err.message}`;
     throw err;
@@ -699,7 +883,7 @@ async function saveMetadata() {
 
 async function saveAndNext() {
   await saveMetadata();
-  goToRelativeCase(1);
+  await goToRelativeCase(1);
 }
 
 async function draftAi() {
@@ -748,6 +932,7 @@ async function draftAi() {
     syncWorkflowFieldsFromMetadata();
     syncMetadata();
     draw();
+    await fetchCaseSummary();
   } catch (err) {
     statusEl.textContent = `AI draft failed: ${err.message}`;
   }
@@ -794,6 +979,15 @@ async function fetchMapList() {
   renderCaseInfo();
 }
 
+async function fetchCaseSummary() {
+  const res = await fetch("/api/case-summary");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load case summary");
+  state.caseSummaries = data.cases || [];
+  renderSummaryMetrics();
+  renderCaseList();
+}
+
 async function loadMapByName(imageName) {
   state.imageName = imageName;
   state.imageUrl = `/maps/${encodeURIComponent(imageName)}`;
@@ -833,6 +1027,28 @@ async function goToRelativeCase(delta) {
   nextIndex = clamp(nextIndex, 0, state.mapList.length - 1);
   if (nextIndex === state.currentMapIndex) return;
   await loadMapByName(state.mapList[nextIndex]);
+}
+
+async function goToNextNeedsReview() {
+  if (!state.caseSummaries.length) return;
+
+  const candidates = state.caseSummaries
+    .filter((c) => c.review_status === "needs_review" || c.review_status === "in_progress")
+    .sort((a, b) => {
+      if (b.disagreement_count !== a.disagreement_count) {
+        return b.disagreement_count - a.disagreement_count;
+      }
+      return a.imageName.localeCompare(b.imageName);
+    });
+
+  if (!candidates.length) return;
+
+  const currentIdx = candidates.findIndex((c) => c.imageName === state.imageName);
+  const target = currentIdx >= 0 && currentIdx < candidates.length - 1
+    ? candidates[currentIdx + 1]
+    : candidates[0];
+
+  await loadMapByName(target.imageName);
 }
 
 function beginPan(clientX, clientY) {
@@ -883,6 +1099,7 @@ imageInput.addEventListener("change", async (e) => {
     );
 
     await fetchMapList();
+    await fetchCaseSummary();
 
     hiddenImage.onload = () => {
       state.imageLoaded = true;
@@ -914,11 +1131,13 @@ colsInput.addEventListener("change", () => {
 labelerInput.addEventListener("input", () => {
   syncMetadataFromWorkflowFields();
   metadataView.value = JSON.stringify(state.metadata, null, 2);
+  renderCaseList();
 });
 
 reviewStatusSelect.addEventListener("change", () => {
   syncMetadataFromWorkflowFields();
   metadataView.value = JSON.stringify(state.metadata, null, 2);
+  renderCaseList();
 });
 
 notesInput.addEventListener("input", () => {
@@ -932,6 +1151,9 @@ overlayModeSelect.addEventListener("change", () => {
   draw();
 });
 
+caseFilterSelect.addEventListener("change", () => renderCaseList());
+caseSortSelect.addEventListener("change", () => renderCaseList());
+
 exportBtn.addEventListener("click", exportMetadata);
 saveBtn.addEventListener("click", () => saveMetadata());
 saveNextBtn.addEventListener("click", () => saveAndNext());
@@ -943,6 +1165,11 @@ fitViewBtn.addEventListener("click", fitView);
 
 prevCaseBtn.addEventListener("click", () => goToRelativeCase(-1));
 nextCaseBtn.addEventListener("click", () => goToRelativeCase(1));
+nextNeedsReviewBtn.addEventListener("click", () => goToNextNeedsReview());
+refreshDashboardBtn.addEventListener("click", () => fetchCaseSummary());
+
+acceptAiBtn.addEventListener("click", acceptAiDraft);
+clearAiBtn.addEventListener("click", clearAiDraft);
 
 metadataView.addEventListener("change", applyMetadataFromTextArea);
 
@@ -997,6 +1224,7 @@ canvas.addEventListener("mousedown", (e) => {
     if (!tile) return;
     pushHistory();
     state.paintDragging = true;
+    state._lastPaintTile = tile;
     applyToolAtTile(tile.r, tile.c);
   }
 });
@@ -1016,15 +1244,9 @@ canvas.addEventListener("mousemove", (e) => {
   }
 
   if (state.paintDragging && tile) {
-    if (state.toolMode === "ambiguous") {
-      // For ambiguity mode, avoid flipping repeatedly while hovering same tile.
-      // Only toggle on initial click, then on entry to a new tile.
-      const last = state._lastPaintTile;
-      if (!last || last.r !== tile.r || last.c !== tile.c) {
-        applyToolAtTile(tile.r, tile.c);
-        state._lastPaintTile = tile;
-      }
-    } else {
+    const last = state._lastPaintTile;
+    if (!last || last.r !== tile.r || last.c !== tile.c) {
+      state._lastPaintTile = tile;
       applyToolAtTile(tile.r, tile.c);
     }
     return;
@@ -1118,9 +1340,7 @@ window.addEventListener("keyup", (e) => {
 
 window.addEventListener("resize", () => {
   draw();
-  if (state.imageLoaded) {
-    renderModeButtons();
-  }
+  if (state.imageLoaded) renderModeButtons();
 });
 
 async function initialize() {
@@ -1140,6 +1360,7 @@ async function initialize() {
 
   try {
     await fetchMapList();
+    await fetchCaseSummary();
   } catch (err) {
     console.warn(err);
   }
