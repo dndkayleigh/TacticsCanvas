@@ -9,12 +9,19 @@ const exportBtn = document.getElementById("exportBtn");
 const undoBtn = document.getElementById("undoBtn");
 const redoBtn = document.getElementById("redoBtn");
 const fitViewBtn = document.getElementById("fitViewBtn");
+const prevCaseBtn = document.getElementById("prevCaseBtn");
+const nextCaseBtn = document.getElementById("nextCaseBtn");
+const saveNextBtn = document.getElementById("saveNextBtn");
 const modePaintBtn = document.getElementById("modePaintBtn");
 const modeEraseBtn = document.getElementById("modeEraseBtn");
 const modePanBtn = document.getElementById("modePanBtn");
+const labelerInput = document.getElementById("labelerInput");
+const reviewStatusSelect = document.getElementById("reviewStatusSelect");
+const notesInput = document.getElementById("notesInput");
 const statusEl = document.getElementById("status");
 const draftMetricsEl = document.getElementById("draftMetrics");
 const cursorInfoEl = document.getElementById("cursorInfo");
+const caseInfoEl = document.getElementById("caseInfo");
 const promptView = document.getElementById("promptView");
 const metadataView = document.getElementById("metadataView");
 const canvas = document.getElementById("mapCanvas");
@@ -42,12 +49,14 @@ const state = {
   dragViewY: 0,
   lastDraftLog: null,
   lastDraftPrompt: "",
-  toolMode: "paint", // paint | erase | pan
+  toolMode: "paint",
   spacePan: false,
   paintDragging: false,
   hoverTile: null,
   historyUndo: [],
   historyRedo: [],
+  mapList: [],
+  currentMapIndex: -1,
 };
 
 function clamp(n, min, max) {
@@ -132,6 +141,18 @@ function buildBlankMetadata() {
       model: state.selectedModel,
       scope: "blocking_only",
       notes: [],
+    },
+    label_source: {
+      status: "human_gold",
+      labeler: "",
+      review_status: "in_progress",
+      reviewer: null,
+      blocking_rule_version: "v1",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    },
+    case_metadata: {
+      notes: "",
     },
   };
 }
@@ -228,6 +249,41 @@ function renderCursorInfo() {
   ].join("\n");
 }
 
+function renderCaseInfo() {
+  if (!state.mapList.length || state.currentMapIndex < 0) {
+    caseInfoEl.textContent = "No case loaded.";
+    return;
+  }
+
+  caseInfoEl.textContent = [
+    `Map: ${state.imageName}`,
+    `Case ${state.currentMapIndex + 1} / ${state.mapList.length}`,
+  ].join("\n");
+}
+
+function syncWorkflowFieldsFromMetadata() {
+  if (!state.metadata) return;
+  labelerInput.value = state.metadata?.label_source?.labeler || "";
+  reviewStatusSelect.value = state.metadata?.label_source?.review_status || "in_progress";
+  notesInput.value = state.metadata?.case_metadata?.notes || "";
+}
+
+function syncMetadataFromWorkflowFields() {
+  if (!state.metadata) return;
+
+  state.metadata.label_source ||= {};
+  state.metadata.label_source.status = "human_gold";
+  state.metadata.label_source.labeler = labelerInput.value || "";
+  state.metadata.label_source.review_status = reviewStatusSelect.value || "in_progress";
+  state.metadata.label_source.reviewer ??= null;
+  state.metadata.label_source.blocking_rule_version ||= "v1";
+  state.metadata.label_source.created_at ||= new Date().toISOString();
+  state.metadata.label_source.updated_at = new Date().toISOString();
+
+  state.metadata.case_metadata ||= {};
+  state.metadata.case_metadata.notes = notesInput.value || "";
+}
+
 function syncMetadata() {
   if (!state.metadata) {
     state.metadata = buildBlankMetadata();
@@ -274,6 +330,8 @@ function syncMetadata() {
   state.metadata.ai_annotation.model = state.selectedModel;
   state.metadata.ai_annotation.scope = "blocking_only";
 
+  syncMetadataFromWorkflowFields();
+
   metadataView.value = JSON.stringify(state.metadata, null, 2);
   rowsInput.value = state.rows;
   colsInput.value = state.cols;
@@ -284,6 +342,7 @@ function syncMetadata() {
   renderPromptView();
   renderModeButtons();
   renderCursorInfo();
+  renderCaseInfo();
 }
 
 function applyMetadataFromTextArea() {
@@ -309,6 +368,7 @@ function applyMetadataFromTextArea() {
       state.cols
     );
 
+    syncWorkflowFieldsFromMetadata();
     syncMetadata();
     draw();
     return true;
@@ -517,6 +577,8 @@ async function saveMetadata() {
   if (!state.imageLoaded) return;
   if (!applyMetadataFromTextArea()) return;
 
+  syncMetadataFromWorkflowFields();
+
   try {
     const res = await fetch(`/api/metadata/${encodeURIComponent(state.imageName)}`, {
       method: "POST",
@@ -526,9 +588,16 @@ async function saveMetadata() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Save failed");
     statusEl.textContent = `Saved ${state.imageName} metadata.`;
+    metadataView.value = JSON.stringify(state.metadata, null, 2);
   } catch (err) {
     statusEl.textContent = `Save failed: ${err.message}`;
+    throw err;
   }
+}
+
+async function saveAndNext() {
+  await saveMetadata();
+  goToRelativeCase(1);
 }
 
 async function draftAi() {
@@ -560,9 +629,6 @@ async function draftAi() {
 
     if (data.metadata?.ai_annotation?.model) {
       state.selectedModel = data.metadata.ai_annotation.model;
-      if (modelSelect.querySelector(`option[value="${state.selectedModel}"]`)) {
-        modelSelect.value = state.selectedModel;
-      }
     }
 
     if (data.prompt_sent) {
@@ -577,6 +643,7 @@ async function draftAi() {
       ].join("\n");
     }
 
+    syncWorkflowFieldsFromMetadata();
     syncMetadata();
     draw();
   } catch (err) {
@@ -612,6 +679,58 @@ async function uploadMapFile(file) {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Upload failed");
   return data;
+}
+
+async function fetchMapList() {
+  const res = await fetch("/api/maps");
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load map list");
+  state.mapList = data.maps || [];
+  if (state.imageName && state.mapList.includes(state.imageName)) {
+    state.currentMapIndex = state.mapList.indexOf(state.imageName);
+  }
+  renderCaseInfo();
+}
+
+async function loadMapByName(imageName) {
+  state.imageName = imageName;
+  state.imageUrl = `/maps/${encodeURIComponent(imageName)}`;
+
+  const metadataRes = await fetch(`/api/metadata/${encodeURIComponent(imageName)}`);
+  const metadataData = await metadataRes.json();
+  if (!metadataRes.ok) throw new Error(metadataData.error || "Failed to load metadata");
+
+  state.metadata = metadataData.metadata;
+  state.imageWidth = state.metadata?.map?.image_width_px || state.imageWidth;
+  state.imageHeight = state.metadata?.map?.image_height_px || state.imageHeight;
+  state.rows = state.metadata?.grid?.rows || state.rows;
+  state.cols = state.metadata?.grid?.cols || state.cols;
+  state.tileSize = state.metadata?.grid?.tile_size_px || state.tileSize;
+
+  if (state.mapList.includes(imageName)) {
+    state.currentMapIndex = state.mapList.indexOf(imageName);
+  }
+
+  hiddenImage.onload = () => {
+    state.imageLoaded = true;
+    state.hoverTile = null;
+    state.historyUndo = [];
+    state.historyRedo = [];
+    syncWorkflowFieldsFromMetadata();
+    syncMetadata();
+    fitView();
+    statusEl.textContent = `Loaded ${state.imageName}.`;
+  };
+
+  hiddenImage.src = state.imageUrl;
+}
+
+async function goToRelativeCase(delta) {
+  if (!state.mapList.length) return;
+  let nextIndex = state.currentMapIndex + delta;
+  nextIndex = clamp(nextIndex, 0, state.mapList.length - 1);
+  if (nextIndex === state.currentMapIndex) return;
+  await loadMapByName(state.mapList[nextIndex]);
 }
 
 function beginPan(clientX, clientY) {
@@ -661,9 +780,14 @@ imageInput.addEventListener("change", async (e) => {
       state.cols
     );
 
+    await fetchMapList();
+
     hiddenImage.onload = () => {
       state.imageLoaded = true;
       state.hoverTile = null;
+      state.historyUndo = [];
+      state.historyRedo = [];
+      syncWorkflowFieldsFromMetadata();
       syncMetadata();
       fitView();
       statusEl.textContent = data.sidecarFound
@@ -685,12 +809,30 @@ colsInput.addEventListener("change", () => {
   syncFromGridDims(Number(rowsInput.value || 1), Number(colsInput.value || 1));
 });
 
+labelerInput.addEventListener("input", () => {
+  syncMetadataFromWorkflowFields();
+  metadataView.value = JSON.stringify(state.metadata, null, 2);
+});
+
+reviewStatusSelect.addEventListener("change", () => {
+  syncMetadataFromWorkflowFields();
+  metadataView.value = JSON.stringify(state.metadata, null, 2);
+});
+
+notesInput.addEventListener("input", () => {
+  syncMetadataFromWorkflowFields();
+  metadataView.value = JSON.stringify(state.metadata, null, 2);
+});
+
 exportBtn.addEventListener("click", exportMetadata);
-saveBtn.addEventListener("click", saveMetadata);
+saveBtn.addEventListener("click", () => saveMetadata());
+saveNextBtn.addEventListener("click", () => saveAndNext());
 draftAiBtn.addEventListener("click", draftAi);
 undoBtn.addEventListener("click", undo);
 redoBtn.addEventListener("click", redo);
 fitViewBtn.addEventListener("click", fitView);
+prevCaseBtn.addEventListener("click", () => goToRelativeCase(-1));
+nextCaseBtn.addEventListener("click", () => goToRelativeCase(1));
 metadataView.addEventListener("change", applyMetadataFromTextArea);
 
 modePaintBtn.addEventListener("click", () => {
@@ -809,6 +951,12 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
+    e.preventDefault();
+    saveMetadata();
+    return;
+  }
+
   if (e.key.toLowerCase() === "p") {
     state.toolMode = "paint";
     renderModeButtons();
@@ -835,16 +983,26 @@ window.addEventListener("resize", () => {
   }
 });
 
-const initialDefault = computeDefaultGridForImage(state.imageWidth, state.imageHeight);
-state.rows = initialDefault.rows;
-state.cols = initialDefault.cols;
-state.tileSize = computeTileSizeFromGrid(
-  state.imageWidth,
-  state.imageHeight,
-  state.rows,
-  state.cols
-);
+async function initialize() {
+  const initialDefault = computeDefaultGridForImage(state.imageWidth, state.imageHeight);
+  state.rows = initialDefault.rows;
+  state.cols = initialDefault.cols;
+  state.tileSize = computeTileSizeFromGrid(
+    state.imageWidth,
+    state.imageHeight,
+    state.rows,
+    state.cols
+  );
 
-state.metadata = buildBlankMetadata();
-syncMetadata();
-draw();
+  state.metadata = buildBlankMetadata();
+  syncMetadata();
+  draw();
+
+  try {
+    await fetchMapList();
+  } catch (err) {
+    console.warn(err);
+  }
+}
+
+initialize();

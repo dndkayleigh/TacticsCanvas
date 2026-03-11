@@ -21,6 +21,16 @@
           </section>
 
           <section class="section">
+            <h2>Case Navigation</h2>
+            <div id="caseInfo">No case loaded.</div>
+            <div class="three-col top-gap">
+              <button id="prevCaseBtn">Previous</button>
+              <button id="nextCaseBtn">Next</button>
+              <button id="saveNextBtn">Save + Next</button>
+            </div>
+          </section>
+
+          <section class="section">
             <label>Draft model</label>
             <select id="modelSelect">
               <option value="gpt-4-mini">ChatGPT 4-mini</option>
@@ -50,6 +60,22 @@
             <p class="muted">
               Shortcuts: P = Paint, E = Erase, H = Pan, Ctrl/Cmd+Z = Undo, Ctrl/Cmd+Y = Redo, Space+Drag = Pan
             </p>
+          </section>
+
+          <section class="section">
+            <h2>Label Workflow</h2>
+            <label>Labeler</label>
+            <input id="labelerInput" type="text" />
+
+            <label class="top-gap">Review status</label>
+            <select id="reviewStatusSelect">
+              <option value="in_progress">In Progress</option>
+              <option value="needs_review">Needs Review</option>
+              <option value="approved">Approved</option>
+            </select>
+
+            <label class="top-gap">Notes</label>
+            <textarea id="notesInput" spellcheck="false"></textarea>
           </section>
 
           <section class="section">

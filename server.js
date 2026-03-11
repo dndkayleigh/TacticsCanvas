@@ -82,38 +82,70 @@ function computeTileSizeFromGrid(width, height, rows, cols) {
   return Math.max(1, Math.round((sizeFromCols + sizeFromRows) / 2));
 }
 
-function buildBlankMetadata({ imageName, width, height }) {
-  const grid = computeDefaultGridForImage(width, height);
-  const tileSize = computeTileSizeFromGrid(width, height, grid.rows, grid.cols);
+function nowIso() {
+  return new Date().toISOString();
+}
 
-  return {
-    schema_version: "0.1.0",
-    purpose: "tactical_map_metadata",
-    map: {
-      name: imageName,
-      image_ref: imageName,
-      image_width_px: width,
-      image_height_px: height,
-    },
-    grid: {
-      type: "square",
-      origin: "bottom_left",
-      tile_size_px: tileSize,
-      rows: grid.rows,
-      cols: grid.cols,
-    },
-    layers: {
-      blocking: Array.from({ length: grid.rows }, () =>
-        Array.from({ length: grid.cols }, () => false)
-      ),
-    },
-    ai_annotation: {
-      status: "none",
-      model: null,
-      scope: "blocking_only",
-      notes: [],
-    },
+function ensureMetadataShape(metadata, imageName, width, height) {
+  if (!metadata || typeof metadata !== "object") {
+    metadata = {};
+  }
+
+  const defaultGrid = computeDefaultGridForImage(width, height);
+  const bounded = enforceAspectBoundedGrid(
+    metadata?.grid?.rows || defaultGrid.rows,
+    metadata?.grid?.cols || defaultGrid.cols,
+    width,
+    height
+  );
+
+  const tileSize = computeTileSizeFromGrid(width, height, bounded.rows, bounded.cols);
+
+  metadata.schema_version = metadata.schema_version || "0.1.0";
+  metadata.purpose = "tactical_map_metadata";
+
+  metadata.map = {
+    name: imageName,
+    image_ref: imageName,
+    image_width_px: width,
+    image_height_px: height,
   };
+
+  metadata.grid = {
+    type: "square",
+    origin: "bottom_left",
+    tile_size_px: tileSize,
+    rows: bounded.rows,
+    cols: bounded.cols,
+  };
+
+  metadata.layers ||= {};
+  const oldBlocking = metadata.layers.blocking || [];
+  const nextBlocking = Array.from({ length: bounded.rows }, (_, r) =>
+    Array.from({ length: bounded.cols }, (_, c) => Boolean(oldBlocking[r]?.[c]))
+  );
+  metadata.layers.blocking = nextBlocking;
+
+  metadata.ai_annotation ||= {
+    status: "none",
+    model: null,
+    scope: "blocking_only",
+    notes: [],
+  };
+
+  metadata.label_source ||= {};
+  metadata.label_source.status ||= "human_gold";
+  metadata.label_source.labeler ||= "";
+  metadata.label_source.review_status ||= "in_progress";
+  metadata.label_source.reviewer ??= null;
+  metadata.label_source.blocking_rule_version ||= "v1";
+  metadata.label_source.created_at ||= nowIso();
+  metadata.label_source.updated_at ||= nowIso();
+
+  metadata.case_metadata ||= {};
+  metadata.case_metadata.notes ||= "";
+
+  return metadata;
 }
 
 function mapUiModelToApiModel(model) {
@@ -198,13 +230,9 @@ async function draftBlockingWithOpenAI({ metadata, model }) {
       "Rows are indexed from the bottom of the image upward. Cols are indexed from the left of the image to the right.",
     instructions: [
       "Return a blocking matrix sized exactly rows x cols.",
-      "true means the tile is occupied by a clearly impassable wall or barrier.",
-      "false means the tile is traversable or uncertain.",
-      "Be conservative. Prefer false unless there is clear visual evidence of an impassable barrier.",
-      "Do not infer extra wall tiles beyond the visible barrier footprint.",
-      "Do not mark furniture, clutter, shadows, labels, or decorative art as blocking.",
-      "Do not fill room interiors; only mark the barrier tiles themselves.",
-      "Use the exact bottom-left row indexing convention."
+      "true means the tile is blocked by a wall or other impassable barrier.",
+      "false means the tile is not blocked.",
+      "Be conservative. Prefer false unless there is clear visual evidence of a wall/barrier.",
     ],
   };
 
@@ -213,25 +241,13 @@ async function draftBlockingWithOpenAI({ metadata, model }) {
     input: [
       {
         role: "system",
-        content: [
-          {
-            type: "input_text",
-            text: systemPrompt,
-          },
-        ],
+        content: [{ type: "input_text", text: systemPrompt }],
       },
       {
         role: "user",
         content: [
-          {
-            type: "input_text",
-            text: JSON.stringify(userPayload),
-          },
-          {
-            type: "input_image",
-            image_url: imageDataUrl,
-            detail: "high",
-          },
+          { type: "input_text", text: JSON.stringify(userPayload) },
+          { type: "input_image", image_url: imageDataUrl, detail: "high" },
         ],
       },
     ],
@@ -267,6 +283,20 @@ app.get("/health", (req, res) => {
   });
 });
 
+app.get("/api/maps", (req, res) => {
+  try {
+    const files = fs.readdirSync(MAP_DIR);
+    const imageFiles = files
+      .filter((name) => /\.(png|jpg|jpeg|webp|gif)$/i.test(name))
+      .sort((a, b) => a.localeCompare(b));
+
+    res.json({ maps: imageFiles });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to list maps." });
+  }
+});
+
 app.post("/api/upload-map", upload.single("mapImage"), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "No image uploaded." });
@@ -283,25 +313,10 @@ app.post("/api/upload-map", upload.single("mapImage"), async (req, res) => {
 
     if (fs.existsSync(sidecarPath)) {
       metadata = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
-      if (metadata?.grid) {
-        const bounded = enforceAspectBoundedGrid(
-          metadata.grid.rows || 1,
-          metadata.grid.cols || 1,
-          width,
-          height
-        );
-        metadata.grid.rows = bounded.rows;
-        metadata.grid.cols = bounded.cols;
-        metadata.grid.tile_size_px = computeTileSizeFromGrid(
-          width,
-          height,
-          bounded.rows,
-          bounded.cols
-        );
-      }
+      metadata = ensureMetadataShape(metadata, imageName, width, height);
       sidecarFound = true;
     } else {
-      metadata = buildBlankMetadata({ imageName, width, height });
+      metadata = ensureMetadataShape({}, imageName, width, height);
       fs.writeFileSync(sidecarPath, JSON.stringify(metadata, null, 2), "utf8");
     }
 
@@ -315,31 +330,25 @@ app.post("/api/upload-map", upload.single("mapImage"), async (req, res) => {
 app.get("/api/metadata/:imageName", (req, res) => {
   try {
     const imageName = req.params.imageName;
+    const imagePath = path.join(MAP_DIR, imageName);
     const sidecarPath = sidecarPathForImageName(imageName);
-    if (!fs.existsSync(sidecarPath)) {
-      return res.status(404).json({ error: "Metadata not found." });
+
+    if (!fs.existsSync(imagePath)) {
+      return res.status(404).json({ error: "Image not found." });
     }
 
-    const metadata = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
-    if (metadata?.grid && metadata?.map) {
-      const width = metadata.map.image_width_px || 1;
-      const height = metadata.map.image_height_px || 1;
-      const bounded = enforceAspectBoundedGrid(
-        metadata.grid.rows || 1,
-        metadata.grid.cols || 1,
-        width,
-        height
-      );
-      metadata.grid.rows = bounded.rows;
-      metadata.grid.cols = bounded.cols;
-      metadata.grid.tile_size_px = computeTileSizeFromGrid(
-        width,
-        height,
-        bounded.rows,
-        bounded.cols
-      );
+    let width = 1200;
+    let height = 800;
+
+    if (fs.existsSync(sidecarPath)) {
+      const metadata = JSON.parse(fs.readFileSync(sidecarPath, "utf8"));
+      width = metadata?.map?.image_width_px || width;
+      height = metadata?.map?.image_height_px || height;
+      const normalized = ensureMetadataShape(metadata, imageName, width, height);
+      return res.json({ metadata: normalized });
     }
 
+    const metadata = ensureMetadataShape({}, imageName, width, height);
     res.json({ metadata });
   } catch (err) {
     console.error(err);
@@ -350,27 +359,14 @@ app.get("/api/metadata/:imageName", (req, res) => {
 app.post("/api/metadata/:imageName", (req, res) => {
   try {
     const imageName = req.params.imageName;
-    const metadata = req.body.metadata;
+    let metadata = req.body.metadata;
     if (!metadata) return res.status(400).json({ error: "Missing metadata." });
 
-    if (metadata?.grid && metadata?.map) {
-      const width = metadata.map.image_width_px || 1;
-      const height = metadata.map.image_height_px || 1;
-      const bounded = enforceAspectBoundedGrid(
-        metadata.grid.rows || 1,
-        metadata.grid.cols || 1,
-        width,
-        height
-      );
-      metadata.grid.rows = bounded.rows;
-      metadata.grid.cols = bounded.cols;
-      metadata.grid.tile_size_px = computeTileSizeFromGrid(
-        width,
-        height,
-        bounded.rows,
-        bounded.cols
-      );
-    }
+    const width = metadata?.map?.image_width_px || 1200;
+    const height = metadata?.map?.image_height_px || 800;
+
+    metadata = ensureMetadataShape(metadata, imageName, width, height);
+    metadata.label_source.updated_at = nowIso();
 
     const sidecarPath = sidecarPathForImageName(imageName);
     fs.writeFileSync(sidecarPath, JSON.stringify(metadata, null, 2), "utf8");
@@ -396,23 +392,10 @@ app.post("/api/draft-blocking", async (req, res) => {
 
     const width = metadata?.map?.image_width_px || 1;
     const height = metadata?.map?.image_height_px || 1;
-    const bounded = enforceAspectBoundedGrid(
-      metadata.grid.rows || 1,
-      metadata.grid.cols || 1,
-      width,
-      height
-    );
-    metadata.grid.rows = bounded.rows;
-    metadata.grid.cols = bounded.cols;
-    metadata.grid.tile_size_px = computeTileSizeFromGrid(
-      width,
-      height,
-      bounded.rows,
-      bounded.cols
-    );
+    const normalized = ensureMetadataShape(metadata, metadata.map.image_ref, width, height);
 
-    const draft = await draftBlockingWithOpenAI({ metadata, model });
-    const next = structuredClone(metadata);
+    const draft = await draftBlockingWithOpenAI({ metadata: normalized, model });
+    const next = structuredClone(normalized);
     next.layers.blocking = draft.blocking;
     next.ai_annotation = {
       status: "drafted",
@@ -420,6 +403,8 @@ app.post("/api/draft-blocking", async (req, res) => {
       scope: "blocking_only",
       notes: draft.notes,
     };
+    next.label_source ||= {};
+    next.label_source.updated_at = nowIso();
 
     const turnaroundMs = Date.now() - startedAt;
     const usage = draft.response.usage || {};
@@ -427,7 +412,7 @@ app.post("/api/draft-blocking", async (req, res) => {
     const logEntry = {
       timestamp: new Date(startedAt).toISOString(),
       endpoint: "/api/draft-blocking",
-      imageName: metadata?.map?.image_ref || null,
+      imageName: normalized?.map?.image_ref || null,
       model_requested: model || "gpt-4-mini",
       model_used: draft.apiModel,
       turnaround_ms: turnaroundMs,
