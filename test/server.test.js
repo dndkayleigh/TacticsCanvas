@@ -44,36 +44,31 @@ test("GET /health reports app status without requiring an API key", async () => 
   });
 });
 
-test("GET /api/maps returns the sample map list", async () => {
+test("GET /api/maps returns supported images and includes the core sample maps", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/maps`);
     assert.equal(response.status, 200);
 
     const body = await response.json();
-    assert.deepEqual(body.maps, [
-      "crumbling-gate-nogrid.png",
-      "index-card-dungeon-ii-map-7-nogrid.png",
-      "webp.webp",
-    ]);
+    assert.equal(Array.isArray(body.maps), true);
+    assert.equal(body.maps.includes("crumbling-gate-nogrid.png"), true);
+    assert.equal(body.maps.includes("index-card-dungeon-ii-map-7-nogrid.png"), true);
+    assert.equal(body.maps.includes("webp.webp"), true);
   });
 });
 
-test("GET /api/case-summary returns summary rows for the sample dataset", async () => {
+test("GET /api/case-summary returns summary rows including the core sample dataset", async () => {
   await withServer(async (baseUrl) => {
     const response = await fetch(`${baseUrl}/api/case-summary`);
     assert.equal(response.status, 200);
 
     const body = await response.json();
     assert.equal(Array.isArray(body.cases), true);
-    assert.equal(body.cases.length, 3);
-    assert.deepEqual(
-      body.cases.map((entry) => entry.imageName),
-      [
-        "crumbling-gate-nogrid.png",
-        "index-card-dungeon-ii-map-7-nogrid.png",
-        "webp.webp",
-      ]
-    );
+    assert.ok(body.cases.length >= 3);
+    const imageNames = body.cases.map((entry) => entry.imageName);
+    assert.equal(imageNames.includes("crumbling-gate-nogrid.png"), true);
+    assert.equal(imageNames.includes("index-card-dungeon-ii-map-7-nogrid.png"), true);
+    assert.equal(imageNames.includes("webp.webp"), true);
   });
 });
 

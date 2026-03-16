@@ -85,9 +85,13 @@
 
           <section class="section">
             <h2>Editing Mode</h2>
-            <div class="four-col">
+            <div class="three-col">
               <button id="modePaintBtn" class="mode-btn active">Paint</button>
               <button id="modeEraseBtn" class="mode-btn">Erase</button>
+              <button id="modeEdgePaintBtn" class="mode-btn">Edge Paint</button>
+            </div>
+            <div class="three-col top-gap">
+              <button id="modeEdgeEraseBtn" class="mode-btn">Edge Erase</button>
               <button id="modeAmbiguousBtn" class="mode-btn">Ambiguous</button>
               <button id="modePanBtn" class="mode-btn">Pan</button>
             </div>
@@ -97,7 +101,10 @@
               <button id="fitViewBtn">Fit View</button>
             </div>
             <p class="muted">
-              Shortcuts: P = Paint, E = Erase, U = Ambiguous, H = Pan, ] = Next Case, [ = Previous Case, J = Next Difference, Shift+J = Previous Difference, R = Mark Ready, A = Approve, G = Promote Gold, 1-9 = Overlays, Ctrl/Cmd+Z = Undo, Ctrl/Cmd+Y = Redo, Space+Drag = Pan
+              Shortcuts: P = Paint, E = Erase, V = Edge Paint, X = Edge Erase, U = Ambiguous, H = Pan, ] = Next Case, [ = Previous Case, J = Next Difference, Shift+J = Previous Difference, R = Mark Ready, A = Approve, G = Promote Gold, 1-9 = Overlays, Ctrl/Cmd+Z = Undo, Ctrl/Cmd+Y = Redo, Space+Drag = Pan
+            </p>
+            <p class="muted">
+              Edge modes edit the canonical boundary layer directly. The older tile blocking layer is preserved as a legacy compatibility view until full reverse migration is implemented.
             </p>
           </section>
 

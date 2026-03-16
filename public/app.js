@@ -20,6 +20,8 @@ const clearAiBtn = document.getElementById("clearAiBtn");
 
 const modePaintBtn = document.getElementById("modePaintBtn");
 const modeEraseBtn = document.getElementById("modeEraseBtn");
+const modeEdgePaintBtn = document.getElementById("modeEdgePaintBtn");
+const modeEdgeEraseBtn = document.getElementById("modeEdgeEraseBtn");
 const modeAmbiguousBtn = document.getElementById("modeAmbiguousBtn");
 const modePanBtn = document.getElementById("modePanBtn");
 
@@ -85,7 +87,9 @@ const state = {
   spacePan: false,
   paintDragging: false,
   hoverTile: null,
+  hoverEdge: null,
   _lastPaintTile: null,
+  _lastPaintEdge: null,
 
   historyUndo: [],
   historyRedo: [],
@@ -112,6 +116,31 @@ function clamp(n, min, max) {
 
 function deepCopyGrid(grid) {
   return grid.map((row) => [...row]);
+}
+
+function cloneEdgeLayer(edgeLayer) {
+  if (!edgeLayer) return null;
+  return {
+    semantic: edgeLayer.semantic || "core.blocking",
+    topology: edgeLayer.topology || "edge_matrix",
+    valueType: edgeLayer.valueType || "boolean",
+    defaultValue: Boolean(edgeLayer.defaultValue),
+    horizontal: deepCopyGrid(edgeLayer.horizontal || []),
+    vertical: deepCopyGrid(edgeLayer.vertical || []),
+  };
+}
+
+function edgeLayerMatchesGrid(edgeLayer, rows = state.rows, cols = state.cols) {
+  if (!edgeLayer) return false;
+  if (!Array.isArray(edgeLayer.horizontal) || edgeLayer.horizontal.length !== rows + 1) return false;
+  if (!Array.isArray(edgeLayer.vertical) || edgeLayer.vertical.length !== rows) return false;
+  for (const row of edgeLayer.horizontal) {
+    if (!Array.isArray(row) || row.length !== cols) return false;
+  }
+  for (const row of edgeLayer.vertical) {
+    if (!Array.isArray(row) || row.length !== cols + 1) return false;
+  }
+  return true;
 }
 
 function countTrue(grid) {
@@ -356,6 +385,8 @@ function renderDraftMetrics() {
 function renderModeButtons() {
   modePaintBtn.classList.toggle("active", state.toolMode === "paint");
   modeEraseBtn.classList.toggle("active", state.toolMode === "erase");
+  modeEdgePaintBtn.classList.toggle("active", state.toolMode === "edge_paint");
+  modeEdgeEraseBtn.classList.toggle("active", state.toolMode === "edge_erase");
   modeAmbiguousBtn.classList.toggle("active", state.toolMode === "ambiguous");
   modePanBtn.classList.toggle("active", state.toolMode === "pan");
 
@@ -367,6 +398,32 @@ function renderModeButtons() {
 }
 
 function renderCursorInfo() {
+  if (
+    state.hoverEdge &&
+    (
+      state.toolMode === "edge_paint" ||
+      state.toolMode === "edge_erase" ||
+      state.overlayMode === "edge_current" ||
+      state.overlayMode === "edge_gold" ||
+      state.overlayMode === "diff_edge_gold_current"
+    )
+  ) {
+    const edgeLayer = getCurrentEdgeBlockingLayer();
+    const value = state.hoverEdge.orientation === "horizontal"
+      ? Boolean(edgeLayer?.horizontal?.[state.hoverEdge.y]?.[state.hoverEdge.x])
+      : Boolean(edgeLayer?.vertical?.[state.hoverEdge.y]?.[state.hoverEdge.x]);
+
+    cursorInfoEl.textContent = [
+      `Edge: ${state.hoverEdge.orientation}`,
+      `Y: ${state.hoverEdge.y}`,
+      `X: ${state.hoverEdge.x}`,
+      `Current: ${value}`,
+      `Mode: ${state.toolMode}`,
+      `Overlay: ${state.overlayMode}`,
+    ].join("\n");
+    return;
+  }
+
   if (!state.hoverTile) {
     cursorInfoEl.textContent = "No tile selected.";
     return;
@@ -609,10 +666,12 @@ function syncMetadataFromWorkflowFields() {
   state.currentSessionState = reviewStatusSelect.value === "approved" ? "reviewed" : "working";
 }
 
-function syncMetadata() {
+function syncMetadata(options = {}) {
   if (!state.metadata) {
     state.metadata = buildBlankMetadata();
   }
+
+  const syncEdgesFromTiles = Boolean(options.syncEdgesFromTiles);
 
   const fitted = enforceAspectBoundedGrid(
     state.rows,
@@ -663,11 +722,16 @@ function syncMetadata() {
   state.metadata.tactical ||= {};
   state.metadata.tactical.boundary_layers ||= {};
   state.metadata.tactical.cell_layers ||= {};
-  state.metadata.tactical.boundary_layers.blocking = migrateTileBlockingToEdgeLayer(
-    state.metadata.layers.blocking,
-    state.rows,
-    state.cols
-  );
+  if (
+    syncEdgesFromTiles ||
+    !edgeLayerMatchesGrid(state.metadata.tactical.boundary_layers.blocking, state.rows, state.cols)
+  ) {
+    state.metadata.tactical.boundary_layers.blocking = migrateTileBlockingToEdgeLayer(
+      state.metadata.layers.blocking,
+      state.rows,
+      state.cols
+    );
+  }
 
   state.metadata.ai_annotation ||= {};
   state.metadata.ai_annotation.model = state.selectedModel;
@@ -752,6 +816,7 @@ function pushHistory() {
   state.historyUndo.push({
     blocking: deepCopyGrid(state.metadata.layers.blocking || []),
     ambiguous: deepCopyGrid(state.metadata.layers.ambiguous || []),
+    edgeBlocking: cloneEdgeLayer(getCurrentEdgeBlockingLayer()),
   });
 
   if (state.historyUndo.length > 100) {
@@ -766,11 +831,13 @@ function undo() {
   state.historyRedo.push({
     blocking: deepCopyGrid(state.metadata.layers.blocking || []),
     ambiguous: deepCopyGrid(state.metadata.layers.ambiguous || []),
+    edgeBlocking: cloneEdgeLayer(getCurrentEdgeBlockingLayer()),
   });
 
   const prev = state.historyUndo.pop();
   state.metadata.layers.blocking = prev.blocking;
   state.metadata.layers.ambiguous = prev.ambiguous;
+  state.metadata.tactical.boundary_layers.blocking = prev.edgeBlocking;
   syncMetadata();
   draw();
 }
@@ -781,11 +848,13 @@ function redo() {
   state.historyUndo.push({
     blocking: deepCopyGrid(state.metadata.layers.blocking || []),
     ambiguous: deepCopyGrid(state.metadata.layers.ambiguous || []),
+    edgeBlocking: cloneEdgeLayer(getCurrentEdgeBlockingLayer()),
   });
 
   const next = state.historyRedo.pop();
   state.metadata.layers.blocking = next.blocking;
   state.metadata.layers.ambiguous = next.ambiguous;
+  state.metadata.tactical.boundary_layers.blocking = next.edgeBlocking;
   syncMetadata();
   draw();
 }
@@ -852,6 +921,30 @@ function drawEdgeLayer(edgeLayer, strokeStyle, lineWidth = 3) {
   }
 }
 
+function drawHighlightedEdge(edge, strokeStyle = "rgba(255,255,0,0.95)", lineWidth = 5) {
+  if (!edge) return;
+
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = lineWidth;
+
+  if (edge.orientation === "horizontal") {
+    const start = imageToScreen(edge.x * state.tileSize, state.imageHeight - edge.y * state.tileSize);
+    const end = imageToScreen((edge.x + 1) * state.tileSize, state.imageHeight - edge.y * state.tileSize);
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    ctx.lineTo(end.x, end.y);
+    ctx.stroke();
+    return;
+  }
+
+  const start = imageToScreen(edge.x * state.tileSize, state.imageHeight - edge.y * state.tileSize);
+  const end = imageToScreen(edge.x * state.tileSize, state.imageHeight - (edge.y + 1) * state.tileSize);
+  ctx.beginPath();
+  ctx.moveTo(start.x, start.y);
+  ctx.lineTo(end.x, end.y);
+  ctx.stroke();
+}
+
 function getCurrentBlockingGrid() {
   return state.metadata?.layers?.blocking || [];
 }
@@ -902,6 +995,7 @@ function getActiveDiffGrids() {
 
 function focusTile(r, c) {
   state.hoverTile = { r, c };
+  state.hoverEdge = null;
   const tileX = c * state.tileSize + state.tileSize / 2;
   const tileY = state.imageHeight - (r + 0.5) * state.tileSize;
   state.viewX = canvas.width / 2 - tileX * state.viewScale;
@@ -1106,6 +1200,19 @@ function draw() {
   if (state.hoverTile) {
     drawTileRect(state.hoverTile.r, state.hoverTile.c, null, "rgba(255,255,0,0.95)", 2);
   }
+
+  if (
+    state.hoverEdge &&
+    (
+      state.toolMode === "edge_paint" ||
+      state.toolMode === "edge_erase" ||
+      state.overlayMode === "edge_current" ||
+      state.overlayMode === "edge_gold" ||
+      state.overlayMode === "diff_edge_gold_current"
+    )
+  ) {
+    drawHighlightedEdge(state.hoverEdge);
+  }
 }
 
 function syncFromGridDims(nextRows, nextCols) {
@@ -1146,6 +1253,59 @@ function getTileAtClientPoint(clientX, clientY) {
   return { r, c };
 }
 
+function getEdgeAtClientPoint(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const sx = clientX - rect.left;
+  const sy = clientY - rect.top;
+  const img = screenToImage(sx, sy);
+
+  if (img.x < 0 || img.y < 0 || img.x >= state.imageWidth || img.y >= state.imageHeight) {
+    return null;
+  }
+
+  const gridX = img.x / state.tileSize;
+  const gridY = (state.imageHeight - img.y) / state.tileSize;
+  const threshold = Math.max(6 / state.viewScale, state.tileSize * 0.18);
+  const candidates = [];
+
+  const nearestVerticalX = Math.round(gridX);
+  if (nearestVerticalX >= 0 && nearestVerticalX <= state.cols) {
+    const edgeY = Math.min(state.rows - 1, Math.max(0, Math.floor(gridY)));
+    if (edgeY >= 0 && edgeY < state.rows) {
+      candidates.push({
+        orientation: "vertical",
+        y: edgeY,
+        x: nearestVerticalX,
+        distance: Math.abs(img.x - nearestVerticalX * state.tileSize),
+      });
+    }
+  }
+
+  const nearestHorizontalY = Math.round(gridY);
+  if (nearestHorizontalY >= 0 && nearestHorizontalY <= state.rows) {
+    const edgeX = Math.min(state.cols - 1, Math.max(0, Math.floor(gridX)));
+    if (edgeX >= 0 && edgeX < state.cols) {
+      candidates.push({
+        orientation: "horizontal",
+        y: nearestHorizontalY,
+        x: edgeX,
+        distance: Math.abs((state.imageHeight - img.y) - nearestHorizontalY * state.tileSize),
+      });
+    }
+  }
+
+  candidates.sort((a, b) => a.distance - b.distance);
+  if (!candidates.length || candidates[0].distance > threshold) {
+    return null;
+  }
+
+  return {
+    orientation: candidates[0].orientation,
+    y: candidates[0].y,
+    x: candidates[0].x,
+  };
+}
+
 function applyToolAtTile(r, c) {
   if (!state.metadata?.layers) return;
 
@@ -1161,6 +1321,35 @@ function applyToolAtTile(r, c) {
     return;
   }
 
+  state.currentSessionState = "working";
+  syncMetadata({ syncEdgesFromTiles: true });
+  draw();
+}
+
+function applyToolAtEdge(edge) {
+  const edgeLayer = getCurrentEdgeBlockingLayer();
+  if (!edge || !edgeLayer) return;
+
+  const targetRow =
+    edge.orientation === "horizontal"
+      ? edgeLayer.horizontal?.[edge.y]
+      : edgeLayer.vertical?.[edge.y];
+  if (!targetRow) return;
+
+  const currentValue = Boolean(targetRow[edge.x]);
+  let nextValue = currentValue;
+
+  if (state.toolMode === "edge_paint") {
+    nextValue = true;
+  } else if (state.toolMode === "edge_erase") {
+    nextValue = false;
+  } else {
+    return;
+  }
+
+  if (currentValue === nextValue) return;
+
+  targetRow[edge.x] = nextValue;
   state.currentSessionState = "working";
   syncMetadata();
   draw();
@@ -1537,6 +1726,7 @@ async function loadMapByName(imageName) {
   hiddenImage.onload = () => {
     state.imageLoaded = true;
     state.hoverTile = null;
+    state.hoverEdge = null;
     state.historyUndo = [];
     state.historyRedo = [];
     syncWorkflowFieldsFromMetadata();
@@ -1638,6 +1828,7 @@ imageInput.addEventListener("change", async (e) => {
     hiddenImage.onload = () => {
       state.imageLoaded = true;
       state.hoverTile = null;
+      state.hoverEdge = null;
       state.historyUndo = [];
       state.historyRedo = [];
       syncWorkflowFieldsFromMetadata();
@@ -1763,6 +1954,24 @@ modeEraseBtn.addEventListener("click", () => {
   renderModeButtons();
 });
 
+modeEdgePaintBtn.addEventListener("click", () => {
+  state.toolMode = "edge_paint";
+  state.overlayMode = "edge_current";
+  overlayModeSelect.value = state.overlayMode;
+  renderModeButtons();
+  renderCursorInfo();
+  draw();
+});
+
+modeEdgeEraseBtn.addEventListener("click", () => {
+  state.toolMode = "edge_erase";
+  state.overlayMode = "edge_current";
+  overlayModeSelect.value = state.overlayMode;
+  renderModeButtons();
+  renderCursorInfo();
+  draw();
+});
+
 modeAmbiguousBtn.addEventListener("click", () => {
   state.toolMode = "ambiguous";
   renderModeButtons();
@@ -1786,7 +1995,9 @@ canvas.addEventListener("contextmenu", (e) => e.preventDefault());
 
 canvas.addEventListener("mousedown", (e) => {
   const tile = getTileAtClientPoint(e.clientX, e.clientY);
+  const edge = getEdgeAtClientPoint(e.clientX, e.clientY);
   state.hoverTile = tile;
+  state.hoverEdge = edge;
   renderCursorInfo();
 
   const wantsPan = state.toolMode === "pan" || state.spacePan;
@@ -1806,12 +2017,23 @@ canvas.addEventListener("mousedown", (e) => {
     state.paintDragging = true;
     state._lastPaintTile = tile;
     applyToolAtTile(tile.r, tile.c);
+    return;
+  }
+
+  if (e.button === 0 && !wantsPan && (state.toolMode === "edge_paint" || state.toolMode === "edge_erase")) {
+    if (!edge) return;
+    pushHistory();
+    state.paintDragging = true;
+    state._lastPaintEdge = edge;
+    applyToolAtEdge(edge);
   }
 });
 
 canvas.addEventListener("mousemove", (e) => {
   const tile = getTileAtClientPoint(e.clientX, e.clientY);
+  const edge = getEdgeAtClientPoint(e.clientX, e.clientY);
   state.hoverTile = tile;
+  state.hoverEdge = edge;
   renderCursorInfo();
 
   if (state.dragging) {
@@ -1823,11 +2045,20 @@ canvas.addEventListener("mousemove", (e) => {
     return;
   }
 
-  if (state.paintDragging && tile) {
+  if (state.paintDragging && tile && (state.toolMode === "paint" || state.toolMode === "erase" || state.toolMode === "ambiguous")) {
     const last = state._lastPaintTile;
     if (!last || last.r !== tile.r || last.c !== tile.c) {
       state._lastPaintTile = tile;
       applyToolAtTile(tile.r, tile.c);
+    }
+    return;
+  }
+
+  if (state.paintDragging && edge && (state.toolMode === "edge_paint" || state.toolMode === "edge_erase")) {
+    const last = state._lastPaintEdge;
+    if (!last || last.orientation !== edge.orientation || last.y !== edge.y || last.x !== edge.x) {
+      state._lastPaintEdge = edge;
+      applyToolAtEdge(edge);
     }
     return;
   }
@@ -1839,13 +2070,16 @@ window.addEventListener("mouseup", () => {
   endPan();
   state.paintDragging = false;
   state._lastPaintTile = null;
+  state._lastPaintEdge = null;
 });
 
 canvas.addEventListener("mouseleave", () => {
   endPan();
   state.paintDragging = false;
   state._lastPaintTile = null;
+  state._lastPaintEdge = null;
   state.hoverTile = null;
+  state.hoverEdge = null;
   renderCursorInfo();
   draw();
 });
@@ -1906,6 +2140,20 @@ window.addEventListener("keydown", (e) => {
   } else if (e.key.toLowerCase() === "e") {
     state.toolMode = "erase";
     renderModeButtons();
+  } else if (e.key.toLowerCase() === "v") {
+    state.toolMode = "edge_paint";
+    state.overlayMode = "edge_current";
+    overlayModeSelect.value = state.overlayMode;
+    renderModeButtons();
+    renderCursorInfo();
+    draw();
+  } else if (e.key.toLowerCase() === "x") {
+    state.toolMode = "edge_erase";
+    state.overlayMode = "edge_current";
+    overlayModeSelect.value = state.overlayMode;
+    renderModeButtons();
+    renderCursorInfo();
+    draw();
   } else if (e.key.toLowerCase() === "u") {
     state.toolMode = "ambiguous";
     renderModeButtons();
