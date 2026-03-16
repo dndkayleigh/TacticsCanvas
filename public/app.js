@@ -100,6 +100,7 @@ const state = {
 
 const {
   makeGrid,
+  migrateTileBlockingToEdgeLayer,
   normalizeMapMetadata,
   validateNormalizedMapMetadata,
   serializeMapMetadata
@@ -166,6 +167,22 @@ function countDifferences(primary, secondary, rows = state.rows, cols = state.co
       if (Boolean(primary[r]?.[c]) !== Boolean(secondary[r]?.[c])) {
         total += 1;
       }
+    }
+  }
+  return total;
+}
+
+function countEdgeSegments(edgeLayer) {
+  if (!edgeLayer) return 0;
+  let total = 0;
+  for (const row of edgeLayer.horizontal || []) {
+    for (const value of row || []) {
+      if (value) total += 1;
+    }
+  }
+  for (const row of edgeLayer.vertical || []) {
+    for (const value of row || []) {
+      if (value) total += 1;
     }
   }
   return total;
@@ -420,6 +437,8 @@ function renderMapMetrics() {
   const human = getCurrentBlockingGrid();
   const ai = getAiBlockingGrid();
   const gold = getGoldBlockingGrid();
+  const currentEdges = getCurrentEdgeBlockingLayer();
+  const goldEdges = getGoldEdgeBlockingLayer();
   const ambiguous = state.metadata.layers.ambiguous || [];
 
   const humanCount = countTrue(human);
@@ -431,6 +450,8 @@ function renderMapMetrics() {
   const disagreement = aiOnly + humanOnly;
   const goldVsCurrent = countDifferences(gold, human);
   const goldVsAi = countDifferences(gold, ai);
+  const currentEdgeCount = countEdgeSegments(currentEdges);
+  const goldEdgeCount = countEdgeSegments(goldEdges);
   const activeDiff = getActiveDiffGrids();
   const activeDiffCount = activeDiff
     ? countDifferences(activeDiff.primary, activeDiff.secondary)
@@ -438,8 +459,10 @@ function renderMapMetrics() {
 
   mapMetricsEl.textContent = [
     `Current blocking: ${humanCount}`,
+    `Current edges: ${currentEdgeCount}`,
     `AI blocking: ${aiCount}`,
     `Gold blocking: ${goldCount}`,
+    `Gold edges: ${goldEdgeCount}`,
     `AI only: ${aiOnly}`,
     `Current only: ${humanOnly}`,
     `AI vs current: ${disagreement}`,
@@ -614,6 +637,14 @@ function syncMetadata() {
     state.rows,
     state.cols
   );
+  state.metadata.tactical ||= {};
+  state.metadata.tactical.boundary_layers ||= {};
+  state.metadata.tactical.cell_layers ||= {};
+  state.metadata.tactical.boundary_layers.blocking = migrateTileBlockingToEdgeLayer(
+    state.metadata.layers.blocking,
+    state.rows,
+    state.cols
+  );
 
   state.metadata.ai_annotation ||= {};
   state.metadata.ai_annotation.model = state.selectedModel;
@@ -767,6 +798,37 @@ function drawTileRect(r, c, fillStyle, strokeStyle = null, lineWidth = 1) {
   }
 }
 
+function drawEdgeLayer(edgeLayer, strokeStyle, lineWidth = 3) {
+  if (!edgeLayer) return;
+
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = lineWidth;
+
+  for (let y = 0; y < state.rows + 1; y++) {
+    for (let x = 0; x < state.cols; x++) {
+      if (!Boolean(edgeLayer.horizontal?.[y]?.[x])) continue;
+      const start = imageToScreen(x * state.tileSize, state.imageHeight - y * state.tileSize);
+      const end = imageToScreen((x + 1) * state.tileSize, state.imageHeight - y * state.tileSize);
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+    }
+  }
+
+  for (let y = 0; y < state.rows; y++) {
+    for (let x = 0; x < state.cols + 1; x++) {
+      if (!Boolean(edgeLayer.vertical?.[y]?.[x])) continue;
+      const start = imageToScreen(x * state.tileSize, state.imageHeight - y * state.tileSize);
+      const end = imageToScreen(x * state.tileSize, state.imageHeight - (y + 1) * state.tileSize);
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      ctx.lineTo(end.x, end.y);
+      ctx.stroke();
+    }
+  }
+}
+
 function getCurrentBlockingGrid() {
   return state.metadata?.layers?.blocking || [];
 }
@@ -777,6 +839,14 @@ function getAiBlockingGrid() {
 
 function getGoldBlockingGrid() {
   return state.publishedArtifact?.metadata?.layers?.blocking || [];
+}
+
+function getCurrentEdgeBlockingLayer() {
+  return state.metadata?.tactical?.boundary_layers?.blocking || null;
+}
+
+function getGoldEdgeBlockingLayer() {
+  return state.publishedArtifact?.metadata?.tactical?.boundary_layers?.blocking || null;
 }
 
 function getActiveDiffGrids() {
@@ -921,6 +991,8 @@ function draw() {
   const human = getCurrentBlockingGrid();
   const ai = getAiBlockingGrid();
   const gold = getGoldBlockingGrid();
+  const currentEdges = getCurrentEdgeBlockingLayer();
+  const goldEdges = getGoldEdgeBlockingLayer();
   const ambiguous = state.metadata?.layers?.ambiguous || [];
 
   for (let r = 0; r < state.rows; r++) {
@@ -935,6 +1007,8 @@ function draw() {
         if (humanVal) {
           drawTileRect(r, c, "rgba(220,38,38,0.38)", "rgba(220,38,38,1)");
         }
+      } else if (state.overlayMode === "edge_current") {
+        // Edges are rendered after tile fills to keep boundary segments crisp.
       } else if (state.overlayMode === "ai") {
         if (aiVal) {
           drawTileRect(r, c, "rgba(249,115,22,0.38)", "rgba(249,115,22,1)");
@@ -985,6 +1059,17 @@ function draw() {
           drawTileRect(r, c, null, "rgba(168,85,247,1)", 2);
         }
       }
+    }
+  }
+
+  if (state.overlayMode === "edge_current") {
+    drawEdgeLayer(currentEdges, "rgba(220,38,38,0.95)", 3);
+  } else if (state.overlayMode === "gold") {
+    drawEdgeLayer(goldEdges, "rgba(34,197,94,0.95)", 3);
+  } else if (state.overlayMode === "all") {
+    drawEdgeLayer(currentEdges, "rgba(220,38,38,0.9)", 2);
+    if (goldEdges) {
+      drawEdgeLayer(goldEdges, "rgba(34,197,94,0.8)", 2);
     }
   }
 
@@ -1840,6 +1925,11 @@ window.addEventListener("keydown", (e) => {
     draw();
   } else if (e.key === "6") {
     state.overlayMode = "diff_gold_ai";
+    overlayModeSelect.value = state.overlayMode;
+    renderCursorInfo();
+    draw();
+  } else if (e.key === "7") {
+    state.overlayMode = "edge_current";
     overlayModeSelect.value = state.overlayMode;
     renderCursorInfo();
     draw();
