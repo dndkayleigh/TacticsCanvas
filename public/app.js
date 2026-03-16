@@ -85,6 +85,9 @@ const state = {
   mapList: [],
   currentMapIndex: -1,
   caseSummaries: [],
+  workflow: null,
+  currentSessionId: null,
+  currentSessionState: "working",
 };
 
 const {
@@ -336,6 +339,7 @@ function renderCaseInfo() {
   caseInfoEl.textContent = [
     `Map: ${state.imageName}`,
     `Case ${state.currentMapIndex + 1} / ${state.mapList.length}`,
+    `Session: ${state.currentSessionState}${state.currentSessionId ? ` (${state.currentSessionId})` : ""}`,
   ].join("\n");
 }
 
@@ -463,6 +467,20 @@ function syncMetadataFromWorkflowFields() {
 
   state.metadata.case_metadata ||= {};
   state.metadata.case_metadata.notes = notesInput.value || "";
+
+  if (state.currentSessionState === "gold") {
+    return;
+  }
+
+  if (
+    state.currentSessionState === "ai_draft" &&
+    state.metadata?.ai_annotation?.status === "drafted" &&
+    reviewStatusSelect.value !== "approved"
+  ) {
+    return;
+  }
+
+  state.currentSessionState = reviewStatusSelect.value === "approved" ? "reviewed" : "working";
 }
 
 function syncMetadata() {
@@ -815,6 +833,7 @@ function applyToolAtTile(r, c) {
     return;
   }
 
+  state.currentSessionState = "working";
   syncMetadata();
   draw();
 }
@@ -826,6 +845,7 @@ function acceptAiDraft() {
 
   pushHistory();
   state.metadata.layers.blocking = deepCopyGrid(state.metadata.layers.ai_blocking);
+  state.currentSessionState = "working";
   syncMetadata();
   draw();
 }
@@ -836,6 +856,7 @@ function clearAiDraft() {
   if (!ok) return;
 
   state.metadata.layers.ai_blocking = makeGrid(state.rows, state.cols, false);
+  state.currentSessionState = "working";
   syncMetadata();
   draw();
 }
@@ -863,13 +884,22 @@ async function saveMetadata() {
     const res = await fetch(`/api/metadata/${encodeURIComponent(state.imageName)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ metadata: state.metadata }),
+      body: JSON.stringify({
+        metadata: state.metadata,
+        session_id: state.currentSessionId,
+        state: state.currentSessionState,
+        source: "human",
+      }),
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || "Save failed");
+    if (!state.currentSessionId) {
+      state.currentSessionId = "legacy-default";
+    }
     statusEl.textContent = `Saved ${state.imageName} metadata.`;
     metadataView.value = JSON.stringify(state.metadata, null, 2);
     await fetchCaseSummary();
+    renderCaseInfo();
   } catch (err) {
     statusEl.textContent = `Save failed: ${err.message}`;
     throw err;
@@ -907,6 +937,8 @@ async function draftAi() {
 
     state.metadata = data.metadata;
     state.lastDraftLog = data.draft_log || null;
+    state.currentSessionId = data.session?.session_id || state.currentSessionId;
+    state.currentSessionState = data.session?.state || "ai_draft";
 
     if (data.metadata?.ai_annotation?.model) {
       state.selectedModel = data.metadata.ai_annotation.model;
@@ -983,15 +1015,50 @@ async function fetchCaseSummary() {
   renderCaseList();
 }
 
+function scoreSessionState(session) {
+  if (session.state === "gold") return 4;
+  if (session.state === "reviewed") return 3;
+  if (session.state === "working") return 2;
+  if (session.state === "ai_draft") return 1;
+  return 0;
+}
+
+function pickPreferredSession(workflowPayload) {
+  const sessions = workflowPayload?.sessions || [];
+  if (!sessions.length) return null;
+
+  return [...sessions].sort((a, b) => {
+    const stateDelta = scoreSessionState(b) - scoreSessionState(a);
+    if (stateDelta !== 0) return stateDelta;
+    return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+  })[0];
+}
+
+async function fetchWorkflowState(imageName) {
+  const res = await fetch(`/api/workflow/${encodeURIComponent(imageName)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to load workflow state");
+  return data;
+}
+
 async function loadMapByName(imageName) {
   state.imageName = imageName;
   state.imageUrl = `/maps/${encodeURIComponent(imageName)}`;
 
-  const metadataRes = await fetch(`/api/metadata/${encodeURIComponent(imageName)}`);
-  const metadataData = await metadataRes.json();
-  if (!metadataRes.ok) throw new Error(metadataData.error || "Failed to load metadata");
+  const [metadataData, workflowData] = await Promise.all([
+    fetch(`/api/metadata/${encodeURIComponent(imageName)}`).then(async (res) => {
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Failed to load metadata");
+      return data;
+    }),
+    fetchWorkflowState(imageName),
+  ]);
 
-  state.metadata = metadataData.metadata;
+  state.workflow = workflowData.workflow || null;
+  const preferredSession = pickPreferredSession(state.workflow);
+  state.metadata = preferredSession?.metadata || metadataData.metadata;
+  state.currentSessionId = preferredSession?.session_id || null;
+  state.currentSessionState = preferredSession?.state || "working";
   state.imageWidth = state.metadata?.map?.image_width_px || state.imageWidth;
   state.imageHeight = state.metadata?.map?.image_height_px || state.imageHeight;
   state.rows = state.metadata?.grid?.rows || state.rows;
@@ -1010,7 +1077,9 @@ async function loadMapByName(imageName) {
     syncWorkflowFieldsFromMetadata();
     syncMetadata();
     fitView();
-    statusEl.textContent = `Loaded ${state.imageName}.`;
+    statusEl.textContent = preferredSession
+      ? `Loaded ${state.imageName} from ${preferredSession.state} session.`
+      : `Loaded ${state.imageName}.`;
   };
 
   hiddenImage.src = state.imageUrl;
@@ -1072,6 +1141,9 @@ imageInput.addEventListener("change", async (e) => {
     state.imageName = data.imageName;
     state.imageUrl = data.imageUrl;
     state.metadata = data.metadata;
+    state.workflow = null;
+    state.currentSessionId = null;
+    state.currentSessionState = "working";
     state.imageWidth = data.metadata?.map?.image_width_px || state.imageWidth;
     state.imageHeight = data.metadata?.map?.image_height_px || state.imageHeight;
 
