@@ -213,6 +213,12 @@ app.post("/api/draft-blocking", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
-  console.log(`Tactical Map Editor running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Tactical Map Editor running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = {
+  app,
+};
