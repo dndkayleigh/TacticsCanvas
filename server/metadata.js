@@ -94,6 +94,42 @@ function migrateTileBlockingToEdgeLayer(blocking, rows, cols) {
   return layer;
 }
 
+function deriveTileBlockingFromEdgeLayer(layer, rows, cols) {
+  const normalized = normalizeEdgeLayer(layer, rows, cols, "core.blocking");
+  const reachable = makeGrid(rows, cols, false);
+  const queue = [];
+
+  function enqueue(r, c) {
+    if (r < 0 || r >= rows || c < 0 || c >= cols) return;
+    if (reachable[r][c]) return;
+    reachable[r][c] = true;
+    queue.push([r, c]);
+  }
+
+  for (let c = 0; c < cols; c++) {
+    if (!normalized.horizontal[0][c]) enqueue(0, c);
+    if (!normalized.horizontal[rows][c]) enqueue(rows - 1, c);
+  }
+
+  for (let r = 0; r < rows; r++) {
+    if (!normalized.vertical[r][0]) enqueue(r, 0);
+    if (!normalized.vertical[r][cols]) enqueue(r, cols - 1);
+  }
+
+  while (queue.length) {
+    const [r, c] = queue.shift();
+
+    if (r > 0 && !normalized.horizontal[r][c]) enqueue(r - 1, c);
+    if (r < rows - 1 && !normalized.horizontal[r + 1][c]) enqueue(r + 1, c);
+    if (c > 0 && !normalized.vertical[r][c]) enqueue(r, c - 1);
+    if (c < cols - 1 && !normalized.vertical[r][c + 1]) enqueue(r, c + 1);
+  }
+
+  return Array.from({ length: rows }, (_, r) =>
+    Array.from({ length: cols }, (_, c) => !reachable[r][c])
+  );
+}
+
 function inferGridFromLayers(layers) {
   const candidates = [
     layers?.blocking,
@@ -185,8 +221,7 @@ function ensureMetadataShape(metadata, imageName, width, height) {
   const oldBlocking = metadata.layers.blocking || [];
   const oldAiBlocking = metadata.layers.ai_blocking || [];
   const oldAmbiguous = metadata.layers.ambiguous || [];
-
-  metadata.layers.blocking = Array.from({ length: bounded.rows }, (_, r) =>
+  const normalizedBlocking = Array.from({ length: bounded.rows }, (_, r) =>
     Array.from({ length: bounded.cols }, (_, c) => Boolean(oldBlocking[r]?.[c]))
   );
 
@@ -203,10 +238,15 @@ function ensureMetadataShape(metadata, imageName, width, height) {
   metadata.tactical.cell_layers ||= {};
   metadata.tactical.boundary_layers.blocking = normalizeEdgeLayer(
     metadata?.tactical?.boundary_layers?.blocking ||
-      migrateTileBlockingToEdgeLayer(metadata.layers.blocking, bounded.rows, bounded.cols),
+      migrateTileBlockingToEdgeLayer(normalizedBlocking, bounded.rows, bounded.cols),
     bounded.rows,
     bounded.cols,
     "core.blocking"
+  );
+  metadata.layers.blocking = deriveTileBlockingFromEdgeLayer(
+    metadata.tactical.boundary_layers.blocking,
+    bounded.rows,
+    bounded.cols
   );
 
   metadata.ai_annotation ||= {
@@ -238,6 +278,7 @@ module.exports = {
   makeEdgeLayer,
   normalizeEdgeLayer,
   migrateTileBlockingToEdgeLayer,
+  deriveTileBlockingFromEdgeLayer,
   inferGridFromLayers,
   inferGridFromEdgeLayer,
   nowIso,

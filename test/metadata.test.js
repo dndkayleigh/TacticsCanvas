@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const {
   computeDefaultGridForImage,
+  deriveTileBlockingFromEdgeLayer,
   ensureMetadataShape,
   migrateTileBlockingToEdgeLayer,
 } = require("../server/metadata");
@@ -67,4 +68,15 @@ test("migrateTileBlockingToEdgeLayer marks only region boundaries", () => {
     [true, false, true],
     [false, true, true],
   ]);
+});
+
+test("deriveTileBlockingFromEdgeLayer reconstructs enclosed blocked regions", () => {
+  const blocking = [
+    [true, true, false],
+    [true, true, false],
+    [false, false, false],
+  ];
+  const edgeLayer = migrateTileBlockingToEdgeLayer(blocking, 3, 3);
+
+  assert.deepEqual(deriveTileBlockingFromEdgeLayer(edgeLayer, 3, 3), blocking);
 });

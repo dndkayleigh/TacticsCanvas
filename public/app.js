@@ -104,6 +104,7 @@ const state = {
 
 const {
   makeGrid,
+  deriveTileBlockingFromEdgeLayer,
   migrateTileBlockingToEdgeLayer,
   normalizeMapMetadata,
   validateNormalizedMapMetadata,
@@ -732,6 +733,11 @@ function syncMetadata(options = {}) {
       state.cols
     );
   }
+  state.metadata.layers.blocking = deriveTileBlockingFromEdgeLayer(
+    state.metadata.tactical.boundary_layers.blocking,
+    state.rows,
+    state.cols
+  );
 
   state.metadata.ai_annotation ||= {};
   state.metadata.ai_annotation.model = state.selectedModel;

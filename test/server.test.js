@@ -4,6 +4,7 @@ const fs = require("fs");
 const path = require("path");
 
 const { app } = require("../server");
+const { migrateTileBlockingToEdgeLayer } = require("../server/metadata");
 const { sidecarPathForImageName } = require("../server/sidecars");
 const {
   publishedArtifactPathForImageName,
@@ -162,6 +163,11 @@ test("metadata save/load preserves tactical edge blocking layers", async () => {
   const imagePath = path.join(MAP_DIR, imageName);
   const sidecarPath = sidecarPathForImageName(MAP_DIR, imageName);
   const workflowPath = sessionStorePathForImageName(WORKFLOW_DIR, imageName);
+  const expectedBlocking = [
+    [true, false],
+    [false, true],
+  ];
+  const expectedEdges = migrateTileBlockingToEdgeLayer(expectedBlocking, 2, 2);
 
   fs.writeFileSync(imagePath, "test-image", "utf8");
 
@@ -178,28 +184,11 @@ test("metadata save/load preserves tactical edge blocking layers", async () => {
           cols: 2,
         },
         layers: {
-          blocking: [
-            [true, false],
-            [false, true],
-          ],
+          blocking: expectedBlocking,
         },
         tactical: {
           boundary_layers: {
-            blocking: {
-              semantic: "core.blocking",
-              topology: "edge_matrix",
-              value_type: "boolean",
-              default: false,
-              horizontal: [
-                [true, false],
-                [false, true],
-                [true, true],
-              ],
-              vertical: [
-                [true, false, true],
-                [false, true, true],
-              ],
-            },
+            blocking: expectedEdges,
           },
           cell_layers: {},
         },
@@ -216,15 +205,9 @@ test("metadata save/load preserves tactical edge blocking layers", async () => {
       assert.equal(loadResponse.status, 200);
 
       const body = await loadResponse.json();
-      assert.deepEqual(body.metadata.tactical.boundary_layers.blocking.horizontal, [
-        [true, false],
-        [false, true],
-        [true, true],
-      ]);
-      assert.deepEqual(body.metadata.tactical.boundary_layers.blocking.vertical, [
-        [true, false, true],
-        [false, true, true],
-      ]);
+      assert.deepEqual(body.metadata.layers.blocking, expectedBlocking);
+      assert.deepEqual(body.metadata.tactical.boundary_layers.blocking.horizontal, expectedEdges.horizontal);
+      assert.deepEqual(body.metadata.tactical.boundary_layers.blocking.vertical, expectedEdges.vertical);
     });
   } finally {
     fs.rmSync(imagePath, { force: true });

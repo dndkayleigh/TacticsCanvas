@@ -6,6 +6,7 @@ const {
   normalizeMapMetadata,
   serializeMapMetadata,
   makeGrid,
+  deriveTileBlockingFromEdgeLayer,
   migrateTileBlockingToEdgeLayer,
 } = require("../public/mapMetadata");
 
@@ -233,4 +234,50 @@ test("serializeMapMetadata preserves normalized review fields and namespaced ext
     [true, false, false, true],
     [false, true, false, false],
   ]);
+});
+
+test("normalizeMapMetadata derives legacy compatibility tiles from canonical edge blocking", () => {
+  const edgeLayer = migrateTileBlockingToEdgeLayer(
+    [
+      [true, true, false],
+      [true, true, false],
+      [false, false, false],
+    ],
+    3,
+    3
+  );
+
+  const normalized = normalizeMapMetadata(
+    {
+      schema_version: "1.0.0",
+      map: {
+        image_ref: "edge-map.png",
+        image_width_px: 300,
+        image_height_px: 300,
+      },
+      grid: {
+        rows: 3,
+        cols: 3,
+        tile_size_px: 100,
+      },
+      layers: {
+        blocking: makeGrid(3, 3, false),
+      },
+      tactical: {
+        boundary_layers: {
+          blocking: edgeLayer,
+        },
+      },
+    },
+    {
+      imageName: "edge-map.png",
+      imageWidth: 300,
+      imageHeight: 300,
+    }
+  );
+
+  assert.deepEqual(
+    normalized.layers.blocking,
+    deriveTileBlockingFromEdgeLayer(edgeLayer, 3, 3)
+  );
 });

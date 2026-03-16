@@ -114,6 +114,46 @@
     return edgeLayer;
   }
 
+  function deriveTileBlockingFromEdgeLayer(layer, rows, cols) {
+    const normalized = ensureEdgeLayer(layer, rows, cols, "core.blocking");
+    const reachable = makeGrid(rows, cols, false);
+    const queue = [];
+
+    function enqueue(r, c) {
+      if (r < 0 || r >= rows || c < 0 || c >= cols) return;
+      if (reachable[r][c]) return;
+      reachable[r][c] = true;
+      queue.push([r, c]);
+    }
+
+    for (let c = 0; c < cols; c++) {
+      if (!normalized.horizontal[0][c]) enqueue(0, c);
+      if (!normalized.horizontal[rows][c]) enqueue(rows - 1, c);
+    }
+
+    for (let r = 0; r < rows; r++) {
+      if (!normalized.vertical[r][0]) enqueue(r, 0);
+      if (!normalized.vertical[r][cols]) enqueue(r, cols - 1);
+    }
+
+    while (queue.length) {
+      const next = queue.shift();
+      const r = next[0];
+      const c = next[1];
+
+      if (r > 0 && !normalized.horizontal[r][c]) enqueue(r - 1, c);
+      if (r < rows - 1 && !normalized.horizontal[r + 1][c]) enqueue(r + 1, c);
+      if (c > 0 && !normalized.vertical[r][c]) enqueue(r, c - 1);
+      if (c < cols - 1 && !normalized.vertical[r][c + 1]) enqueue(r, c + 1);
+    }
+
+    return Array.from({ length: rows }, function (_, r) {
+      return Array.from({ length: cols }, function (_, c) {
+        return !reachable[r][c];
+      });
+    });
+  }
+
   function defaultCalibration() {
     return {
       mapOffsetPx: { x: 0, y: 0 },
@@ -204,7 +244,7 @@
     const cols = toPositiveInt(src.grid && src.grid.cols, 1);
     const tileSizePx = toPositiveInt(src.grid && src.grid.tile_size_px, 32);
 
-    const blocking = ensureBlockingGrid(
+    const rawBlocking = ensureBlockingGrid(
       src.layers && src.layers.blocking,
       rows,
       cols
@@ -222,10 +262,11 @@
       !src.tactical.boundary_layers ||
       !src.tactical.boundary_layers.blocking
     ) {
-      const migrated = migrateTileBlockingToEdgeLayer(blocking, rows, cols);
+      const migrated = migrateTileBlockingToEdgeLayer(rawBlocking, rows, cols);
       boundaryBlocking.horizontal = migrated.horizontal;
       boundaryBlocking.vertical = migrated.vertical;
     }
+    const blocking = deriveTileBlockingFromEdgeLayer(boundaryBlocking, rows, cols);
 
     const calibration = {
       mapOffsetPx: {
@@ -487,7 +528,17 @@
       },
 
       layers: {
-        blocking: deepClone(normalized.layers.blocking)
+        blocking: deepClone(
+          normalized.tactical &&
+            normalized.tactical.boundaryLayers &&
+            normalized.tactical.boundaryLayers.blocking
+            ? deriveTileBlockingFromEdgeLayer(
+                normalized.tactical.boundaryLayers.blocking,
+                normalized.grid.rows,
+                normalized.grid.cols
+              )
+            : normalized.layers.blocking
+        )
       },
 
       tactical: {
@@ -563,6 +614,7 @@
     makeGrid: makeGrid,
     makeEdgeLayer: makeEdgeLayer,
     migrateTileBlockingToEdgeLayer: migrateTileBlockingToEdgeLayer,
+    deriveTileBlockingFromEdgeLayer: deriveTileBlockingFromEdgeLayer,
     normalizeMapMetadata: normalizeMapMetadata,
     validateNormalizedMapMetadata: validateNormalizedMapMetadata,
     serializeMapMetadata: serializeMapMetadata
