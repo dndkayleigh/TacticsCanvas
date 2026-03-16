@@ -188,6 +188,27 @@ function countEdgeSegments(edgeLayer) {
   return total;
 }
 
+function countEdgeDifferences(primary, secondary) {
+  if (!primary && !secondary) return 0;
+
+  let total = 0;
+  for (let y = 0; y < state.rows + 1; y++) {
+    for (let x = 0; x < state.cols; x++) {
+      if (Boolean(primary?.horizontal?.[y]?.[x]) !== Boolean(secondary?.horizontal?.[y]?.[x])) {
+        total += 1;
+      }
+    }
+  }
+  for (let y = 0; y < state.rows; y++) {
+    for (let x = 0; x < state.cols + 1; x++) {
+      if (Boolean(primary?.vertical?.[y]?.[x]) !== Boolean(secondary?.vertical?.[y]?.[x])) {
+        total += 1;
+      }
+    }
+  }
+  return total;
+}
+
 function computeDefaultGridForImage(imageWidth, imageHeight) {
   if (imageWidth >= imageHeight) {
     const cols = 40;
@@ -452,6 +473,7 @@ function renderMapMetrics() {
   const goldVsAi = countDifferences(gold, ai);
   const currentEdgeCount = countEdgeSegments(currentEdges);
   const goldEdgeCount = countEdgeSegments(goldEdges);
+  const goldVsCurrentEdgeDiff = countEdgeDifferences(goldEdges, currentEdges);
   const activeDiff = getActiveDiffGrids();
   const activeDiffCount = activeDiff
     ? countDifferences(activeDiff.primary, activeDiff.secondary)
@@ -468,6 +490,7 @@ function renderMapMetrics() {
     `AI vs current: ${disagreement}`,
     `Gold vs current: ${goldVsCurrent}`,
     `Gold vs AI: ${goldVsAi}`,
+    `Gold vs current edges: ${goldVsCurrentEdgeDiff}`,
     `Active overlay diff: ${activeDiffCount ?? "n/a"}`,
     `Ambiguous: ${ambiguousCount}`,
   ].join("\n");
@@ -1017,6 +1040,8 @@ function draw() {
         if (goldVal) {
           drawTileRect(r, c, "rgba(34,197,94,0.34)", "rgba(34,197,94,1)");
         }
+      } else if (state.overlayMode === "edge_gold") {
+        // Gold edges are rendered after tile fills to keep boundary segments crisp.
       } else if (state.overlayMode === "diff_ai_current") {
         if (humanVal && aiVal) {
           drawTileRect(r, c, "rgba(220,38,38,0.30)", "rgba(220,38,38,0.95)");
@@ -1064,6 +1089,11 @@ function draw() {
 
   if (state.overlayMode === "edge_current") {
     drawEdgeLayer(currentEdges, "rgba(220,38,38,0.95)", 3);
+  } else if (state.overlayMode === "edge_gold") {
+    drawEdgeLayer(goldEdges, "rgba(34,197,94,0.95)", 3);
+  } else if (state.overlayMode === "diff_edge_gold_current") {
+    drawEdgeLayer(currentEdges, "rgba(220,38,38,0.9)", 3);
+    drawEdgeLayer(goldEdges, "rgba(34,197,94,0.9)", 2);
   } else if (state.overlayMode === "gold") {
     drawEdgeLayer(goldEdges, "rgba(34,197,94,0.95)", 3);
   } else if (state.overlayMode === "all") {
@@ -1930,6 +1960,16 @@ window.addEventListener("keydown", (e) => {
     draw();
   } else if (e.key === "7") {
     state.overlayMode = "edge_current";
+    overlayModeSelect.value = state.overlayMode;
+    renderCursorInfo();
+    draw();
+  } else if (e.key === "8") {
+    state.overlayMode = "edge_gold";
+    overlayModeSelect.value = state.overlayMode;
+    renderCursorInfo();
+    draw();
+  } else if (e.key === "9") {
+    state.overlayMode = "diff_edge_gold_current";
     overlayModeSelect.value = state.overlayMode;
     renderCursorInfo();
     draw();
