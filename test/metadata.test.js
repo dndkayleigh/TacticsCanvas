@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   computeDefaultGridForImage,
   ensureMetadataShape,
+  migrateTileBlockingToEdgeLayer,
 } = require("../server/metadata");
 
 test("computeDefaultGridForImage keeps wide maps within 40 columns", () => {
@@ -40,7 +41,30 @@ test("ensureMetadataShape normalizes missing fields and grid layers", () => {
   assert.equal(metadata.layers.blocking[0][1], false);
   assert.equal(metadata.layers.ai_blocking[0][0], false);
   assert.equal(metadata.layers.ambiguous[0][0], false);
+  assert.equal(metadata.tactical.boundary_layers.blocking.horizontal.length, 21);
+  assert.equal(metadata.tactical.boundary_layers.blocking.vertical.length, 20);
   assert.equal(metadata.ai_annotation.status, "none");
   assert.equal(metadata.label_source.review_status, "in_progress");
   assert.equal(metadata.case_metadata.notes, "");
+});
+
+test("migrateTileBlockingToEdgeLayer marks only region boundaries", () => {
+  const layer = migrateTileBlockingToEdgeLayer(
+    [
+      [true, true],
+      [false, true],
+    ],
+    2,
+    2
+  );
+
+  assert.deepEqual(layer.horizontal, [
+    [true, true],
+    [true, false],
+    [false, true],
+  ]);
+  assert.deepEqual(layer.vertical, [
+    [true, false, true],
+    [false, true, true],
+  ]);
 });

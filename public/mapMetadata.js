@@ -55,6 +55,65 @@
     return normalized;
   }
 
+  function makeEdgeLayer(rows, cols, semantic) {
+    return {
+      semantic: semantic || "core.blocking",
+      topology: "edge_matrix",
+      valueType: "boolean",
+      defaultValue: false,
+      horizontal: makeGrid(rows + 1, cols, false),
+      vertical: makeGrid(rows, cols + 1, false)
+    };
+  }
+
+  function ensureEdgeLayer(layer, rows, cols, semantic) {
+    const normalized = makeEdgeLayer(rows, cols, semantic);
+    const src = isObject(layer) ? layer : {};
+
+    normalized.semantic = src.semantic || semantic || "core.blocking";
+    normalized.topology = src.topology || "edge_matrix";
+    normalized.valueType = src.valueType || src.value_type || "boolean";
+    normalized.defaultValue = src.defaultValue !== undefined
+      ? Boolean(src.defaultValue)
+      : Boolean(src.default);
+
+    for (let y = 0; y < rows + 1; y++) {
+      for (let x = 0; x < cols; x++) {
+        normalized.horizontal[y][x] = Boolean(src.horizontal && src.horizontal[y] && src.horizontal[y][x]);
+      }
+    }
+
+    for (let y = 0; y < rows; y++) {
+      for (let x = 0; x < cols + 1; x++) {
+        normalized.vertical[y][x] = Boolean(src.vertical && src.vertical[y] && src.vertical[y][x]);
+      }
+    }
+
+    return normalized;
+  }
+
+  function migrateTileBlockingToEdgeLayer(blocking, rows, cols) {
+    const edgeLayer = makeEdgeLayer(rows, cols, "core.blocking");
+
+    for (let r = 0; r < rows; r++) {
+      for (let c = 0; c < cols; c++) {
+        if (!Boolean(blocking && blocking[r] && blocking[r][c])) continue;
+
+        const southBoundary = r === 0 || !Boolean(blocking[r - 1] && blocking[r - 1][c]);
+        const northBoundary = r === rows - 1 || !Boolean(blocking[r + 1] && blocking[r + 1][c]);
+        const westBoundary = c === 0 || !Boolean(blocking[r] && blocking[r][c - 1]);
+        const eastBoundary = c === cols - 1 || !Boolean(blocking[r] && blocking[r][c + 1]);
+
+        if (southBoundary) edgeLayer.horizontal[r][c] = true;
+        if (northBoundary) edgeLayer.horizontal[r + 1][c] = true;
+        if (westBoundary) edgeLayer.vertical[r][c] = true;
+        if (eastBoundary) edgeLayer.vertical[r][c + 1] = true;
+      }
+    }
+
+    return edgeLayer;
+  }
+
   function defaultCalibration() {
     return {
       mapOffsetPx: { x: 0, y: 0 },
@@ -150,6 +209,23 @@
       rows,
       cols
     );
+    const boundaryBlocking = ensureEdgeLayer(
+      src.tactical &&
+        src.tactical.boundary_layers &&
+        src.tactical.boundary_layers.blocking,
+      rows,
+      cols,
+      "core.blocking"
+    );
+    if (
+      !src.tactical ||
+      !src.tactical.boundary_layers ||
+      !src.tactical.boundary_layers.blocking
+    ) {
+      const migrated = migrateTileBlockingToEdgeLayer(blocking, rows, cols);
+      boundaryBlocking.horizontal = migrated.horizontal;
+      boundaryBlocking.vertical = migrated.vertical;
+    }
 
     const calibration = {
       mapOffsetPx: {
@@ -268,6 +344,15 @@
         blocking: blocking
       },
 
+      tactical: {
+        boundaryLayers: {
+          blocking: boundaryBlocking
+        },
+        cellLayers: isObject(src.tactical && src.tactical.cell_layers)
+          ? deepClone(src.tactical.cell_layers)
+          : {}
+      },
+
       annotation: annotation,
       extensions: extractExtensions(src),
 
@@ -334,6 +419,33 @@
       }
     }
 
+    const edgeBlocking = metadata.tactical &&
+      metadata.tactical.boundaryLayers &&
+      metadata.tactical.boundaryLayers.blocking;
+    if (!isObject(edgeBlocking)) {
+      errors.push("tactical.boundaryLayers.blocking must be an object");
+    } else {
+      if (!Array.isArray(edgeBlocking.horizontal) || edgeBlocking.horizontal.length !== rows + 1) {
+        errors.push("tactical.boundaryLayers.blocking.horizontal must have rows + 1 rows");
+      } else {
+        for (let y = 0; y < edgeBlocking.horizontal.length; y++) {
+          if (!Array.isArray(edgeBlocking.horizontal[y]) || edgeBlocking.horizontal[y].length !== cols) {
+            errors.push("tactical.boundaryLayers.blocking.horizontal row " + y + " must contain exactly " + cols + " columns");
+          }
+        }
+      }
+
+      if (!Array.isArray(edgeBlocking.vertical) || edgeBlocking.vertical.length !== rows) {
+        errors.push("tactical.boundaryLayers.blocking.vertical must have one row per grid row");
+      } else {
+        for (let y = 0; y < edgeBlocking.vertical.length; y++) {
+          if (!Array.isArray(edgeBlocking.vertical[y]) || edgeBlocking.vertical[y].length !== cols + 1) {
+            errors.push("tactical.boundaryLayers.blocking.vertical row " + y + " must contain exactly " + (cols + 1) + " columns");
+          }
+        }
+      }
+    }
+
     return {
       valid: errors.length === 0,
       errors: errors
@@ -378,6 +490,51 @@
         blocking: deepClone(normalized.layers.blocking)
       },
 
+      tactical: {
+        boundary_layers: {
+          blocking: {
+            semantic:
+              normalized.tactical &&
+              normalized.tactical.boundaryLayers &&
+              normalized.tactical.boundaryLayers.blocking &&
+              normalized.tactical.boundaryLayers.blocking.semantic
+                ? normalized.tactical.boundaryLayers.blocking.semantic
+                : "core.blocking",
+            topology: "edge_matrix",
+            value_type: "boolean",
+            default: false,
+            horizontal: deepClone(
+              normalized.tactical &&
+                normalized.tactical.boundaryLayers &&
+                normalized.tactical.boundaryLayers.blocking &&
+                normalized.tactical.boundaryLayers.blocking.horizontal
+                ? normalized.tactical.boundaryLayers.blocking.horizontal
+                : migrateTileBlockingToEdgeLayer(
+                    normalized.layers.blocking,
+                    normalized.grid.rows,
+                    normalized.grid.cols
+                  ).horizontal
+            ),
+            vertical: deepClone(
+              normalized.tactical &&
+                normalized.tactical.boundaryLayers &&
+                normalized.tactical.boundaryLayers.blocking &&
+                normalized.tactical.boundaryLayers.blocking.vertical
+                ? normalized.tactical.boundaryLayers.blocking.vertical
+                : migrateTileBlockingToEdgeLayer(
+                    normalized.layers.blocking,
+                    normalized.grid.rows,
+                    normalized.grid.cols
+                  ).vertical
+            )
+          }
+        },
+        cell_layers:
+          normalized.tactical && normalized.tactical.cellLayers
+            ? deepClone(normalized.tactical.cellLayers)
+            : {}
+      },
+
       annotation: {
         ai: {
           status: ai.status != null ? ai.status : null,
@@ -404,6 +561,8 @@
 
   const api = {
     makeGrid: makeGrid,
+    makeEdgeLayer: makeEdgeLayer,
+    migrateTileBlockingToEdgeLayer: migrateTileBlockingToEdgeLayer,
     normalizeMapMetadata: normalizeMapMetadata,
     validateNormalizedMapMetadata: validateNormalizedMapMetadata,
     serializeMapMetadata: serializeMapMetadata

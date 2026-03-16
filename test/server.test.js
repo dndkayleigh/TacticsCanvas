@@ -162,6 +162,82 @@ test("POST /api/draft-blocking returns a graceful error when no API key is confi
   });
 });
 
+test("metadata save/load preserves tactical edge blocking layers", async () => {
+  const imageName = `test-edge-roundtrip-${Date.now()}.png`;
+  const imagePath = path.join(MAP_DIR, imageName);
+  const sidecarPath = sidecarPathForImageName(MAP_DIR, imageName);
+  const workflowPath = sessionStorePathForImageName(WORKFLOW_DIR, imageName);
+
+  fs.writeFileSync(imagePath, "test-image", "utf8");
+
+  try {
+    await withServer(async (baseUrl) => {
+      const metadata = {
+        map: {
+          image_ref: imageName,
+          image_width_px: 200,
+          image_height_px: 200,
+        },
+        grid: {
+          rows: 2,
+          cols: 2,
+        },
+        layers: {
+          blocking: [
+            [true, false],
+            [false, true],
+          ],
+        },
+        tactical: {
+          boundary_layers: {
+            blocking: {
+              semantic: "core.blocking",
+              topology: "edge_matrix",
+              value_type: "boolean",
+              default: false,
+              horizontal: [
+                [true, false],
+                [false, true],
+                [true, true],
+              ],
+              vertical: [
+                [true, false, true],
+                [false, true, true],
+              ],
+            },
+          },
+          cell_layers: {},
+        },
+      };
+
+      const saveResponse = await fetch(`${baseUrl}/api/metadata/${imageName}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metadata }),
+      });
+      assert.equal(saveResponse.status, 200);
+
+      const loadResponse = await fetch(`${baseUrl}/api/metadata/${imageName}`);
+      assert.equal(loadResponse.status, 200);
+
+      const body = await loadResponse.json();
+      assert.deepEqual(body.metadata.tactical.boundary_layers.blocking.horizontal, [
+        [true, false],
+        [false, true],
+        [true, true],
+      ]);
+      assert.deepEqual(body.metadata.tactical.boundary_layers.blocking.vertical, [
+        [true, false, true],
+        [false, true, true],
+      ]);
+    });
+  } finally {
+    fs.rmSync(imagePath, { force: true });
+    fs.rmSync(sidecarPath, { force: true });
+    fs.rmSync(workflowPath, { force: true });
+  }
+});
+
 test("POST /api/upload-map creates a sidecar for a newly uploaded map", async () => {
   const imageName = `test-upload-${Date.now()}.png`;
   const imagePath = path.join(MAP_DIR, imageName);

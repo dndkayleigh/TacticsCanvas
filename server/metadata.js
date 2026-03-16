@@ -31,6 +31,69 @@ function computeTileSizeFromGrid(width, height, rows, cols) {
   return Math.max(1, Math.round((sizeFromCols + sizeFromRows) / 2));
 }
 
+function makeGrid(rows, cols, fill = false) {
+  return Array.from({ length: rows }, () =>
+    Array.from({ length: cols }, () => fill)
+  );
+}
+
+function makeEdgeLayer(rows, cols, semantic = "core.blocking") {
+  return {
+    semantic,
+    topology: "edge_matrix",
+    value_type: "boolean",
+    default: false,
+    horizontal: makeGrid(rows + 1, cols, false),
+    vertical: makeGrid(rows, cols + 1, false),
+  };
+}
+
+function normalizeEdgeLayer(layer, rows, cols, semantic = "core.blocking") {
+  const normalized = makeEdgeLayer(rows, cols, semantic);
+  const source = layer && typeof layer === "object" ? layer : {};
+
+  normalized.semantic = source.semantic || semantic;
+  normalized.topology = source.topology || "edge_matrix";
+  normalized.value_type = source.value_type || "boolean";
+  normalized.default = source.default === undefined ? false : Boolean(source.default);
+
+  for (let y = 0; y < rows + 1; y++) {
+    for (let x = 0; x < cols; x++) {
+      normalized.horizontal[y][x] = Boolean(source.horizontal?.[y]?.[x]);
+    }
+  }
+
+  for (let y = 0; y < rows; y++) {
+    for (let x = 0; x < cols + 1; x++) {
+      normalized.vertical[y][x] = Boolean(source.vertical?.[y]?.[x]);
+    }
+  }
+
+  return normalized;
+}
+
+function migrateTileBlockingToEdgeLayer(blocking, rows, cols) {
+  const layer = makeEdgeLayer(rows, cols, "core.blocking");
+
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (!Boolean(blocking?.[r]?.[c])) continue;
+
+      const southBlocked = r === 0 || !Boolean(blocking?.[r - 1]?.[c]);
+      const northBlocked = r === rows - 1 || !Boolean(blocking?.[r + 1]?.[c]);
+      const westBlocked = c === 0 || !Boolean(blocking?.[r]?.[c - 1]);
+      const eastBlocked = c === cols - 1 || !Boolean(blocking?.[r]?.[c + 1]);
+
+      if (southBlocked) layer.horizontal[r][c] = true;
+      if (northBlocked) layer.horizontal[r + 1][c] = true;
+      if (westBlocked) layer.vertical[r][c] = true;
+      if (eastBlocked) layer.vertical[r][c + 1] = true;
+    }
+  }
+
+  return layer;
+}
+
 function inferGridFromLayers(layers) {
   const candidates = [
     layers?.blocking,
@@ -57,6 +120,26 @@ function inferGridFromLayers(layers) {
   return null;
 }
 
+function inferGridFromEdgeLayer(layer) {
+  if (!layer || typeof layer !== "object") {
+    return null;
+  }
+
+  const horizontalRows = Array.isArray(layer.horizontal) ? layer.horizontal.length : 0;
+  const verticalRows = Array.isArray(layer.vertical) ? layer.vertical.length : 0;
+  const horizontalCols = Array.isArray(layer.horizontal?.[0]) ? layer.horizontal[0].length : 0;
+  const verticalCols = Array.isArray(layer.vertical?.[0]) ? layer.vertical[0].length : 0;
+
+  const rows = verticalRows || Math.max(0, horizontalRows - 1);
+  const cols = horizontalCols || Math.max(0, verticalCols - 1);
+
+  if (rows > 0 && cols > 0) {
+    return { rows, cols };
+  }
+
+  return null;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -67,10 +150,13 @@ function ensureMetadataShape(metadata, imageName, width, height) {
   }
 
   const defaultGrid = computeDefaultGridForImage(width, height);
+  const inferredEdgeGrid = inferGridFromEdgeLayer(
+    metadata?.tactical?.boundary_layers?.blocking
+  );
   const inferredGrid = inferGridFromLayers(metadata.layers);
   const bounded = enforceAspectBoundedGrid(
-    metadata?.grid?.rows || inferredGrid?.rows || defaultGrid.rows,
-    metadata?.grid?.cols || inferredGrid?.cols || defaultGrid.cols,
+    metadata?.grid?.rows || inferredGrid?.rows || inferredEdgeGrid?.rows || defaultGrid.rows,
+    metadata?.grid?.cols || inferredGrid?.cols || inferredEdgeGrid?.cols || defaultGrid.cols,
     width,
     height
   );
@@ -112,6 +198,17 @@ function ensureMetadataShape(metadata, imageName, width, height) {
     Array.from({ length: bounded.cols }, (_, c) => Boolean(oldAmbiguous[r]?.[c]))
   );
 
+  metadata.tactical ||= {};
+  metadata.tactical.boundary_layers ||= {};
+  metadata.tactical.cell_layers ||= {};
+  metadata.tactical.boundary_layers.blocking = normalizeEdgeLayer(
+    metadata?.tactical?.boundary_layers?.blocking ||
+      migrateTileBlockingToEdgeLayer(metadata.layers.blocking, bounded.rows, bounded.cols),
+    bounded.rows,
+    bounded.cols,
+    "core.blocking"
+  );
+
   metadata.ai_annotation ||= {
     status: "none",
     model: null,
@@ -138,7 +235,11 @@ module.exports = {
   computeDefaultGridForImage,
   enforceAspectBoundedGrid,
   computeTileSizeFromGrid,
+  makeEdgeLayer,
+  normalizeEdgeLayer,
+  migrateTileBlockingToEdgeLayer,
   inferGridFromLayers,
+  inferGridFromEdgeLayer,
   nowIso,
   ensureMetadataShape,
 };

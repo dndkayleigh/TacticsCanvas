@@ -6,6 +6,7 @@ const {
   normalizeMapMetadata,
   serializeMapMetadata,
   makeGrid,
+  migrateTileBlockingToEdgeLayer,
 } = require("../public/mapMetadata");
 
 test("ensureMetadataShape preserves legacy layer data while normalizing dimensions", () => {
@@ -61,6 +62,15 @@ test("ensureMetadataShape preserves legacy layer data while normalizing dimensio
   assert.equal(metadata.label_source.reviewer, "qa-user");
   assert.equal(metadata.label_source.created_at, "2026-01-01T00:00:00.000Z");
   assert.equal(metadata.case_metadata.notes, "legacy case note");
+  assert.deepEqual(metadata.tactical.boundary_layers.blocking.horizontal, [
+    [true, false],
+    [true, true],
+    [false, true],
+  ]);
+  assert.deepEqual(metadata.tactical.boundary_layers.blocking.vertical, [
+    [true, true, false],
+    [false, true, true],
+  ]);
 });
 
 test("normalizeMapMetadata lifts legacy review and AI fields into the shared normalized shape", () => {
@@ -129,6 +139,14 @@ test("normalizeMapMetadata lifts legacy review and AI fields into the shared nor
     [true, false, false, true],
     [false, true, false, false],
   ]);
+  assert.deepEqual(
+    normalized.tactical.boundaryLayers.blocking.horizontal,
+    migrateTileBlockingToEdgeLayer(normalized.layers.blocking, 2, 4).horizontal
+  );
+  assert.deepEqual(
+    normalized.tactical.boundaryLayers.blocking.vertical,
+    migrateTileBlockingToEdgeLayer(normalized.layers.blocking, 2, 4).vertical
+  );
   assert.deepEqual(normalized.extensions.tacticsCanvas.ai_blocking, makeGrid(2, 4, true));
   assert.deepEqual(normalized.extensions.tacticsCanvas.ambiguous, [
     [false, false, true, false],
@@ -199,6 +217,17 @@ test("serializeMapMetadata preserves normalized review fields and namespaced ext
   assert.equal(serialized.annotation.review.labeler, "tester");
   assert.equal(serialized.annotation.review.notes, "review note");
   assert.equal(serialized.calibration.map_opacity, 0.9);
+  assert.deepEqual(
+    serialized.tactical.boundary_layers.blocking.horizontal,
+    migrateTileBlockingToEdgeLayer(
+      [
+        [true, false, false, true],
+        [false, true, false, false],
+      ],
+      2,
+      4
+    ).horizontal
+  );
   assert.deepEqual(serialized.extensions.customConsumer, { foo: "bar" });
   assert.deepEqual(serialized.layers.blocking, [
     [true, false, false, true],
