@@ -30,6 +30,9 @@ const sessionSelect = document.getElementById("sessionSelect");
 const refreshWorkflowBtn = document.getElementById("refreshWorkflowBtn");
 const publishSessionBtn = document.getElementById("publishSessionBtn");
 const workflowInfoEl = document.getElementById("workflowInfo");
+const markReadyBtn = document.getElementById("markReadyBtn");
+const approveReviewBtn = document.getElementById("approveReviewBtn");
+const promoteGoldBtn = document.getElementById("promoteGoldBtn");
 
 const caseFilterSelect = document.getElementById("caseFilterSelect");
 const caseSortSelect = document.getElementById("caseSortSelect");
@@ -1137,6 +1140,87 @@ async function publishCurrentSession() {
   renderWorkflowInfo();
 }
 
+async function saveSessionRecord({
+  sessionId = state.currentSessionId,
+  sessionState = state.currentSessionState,
+  parentSessionId = null,
+  source = "human",
+}) {
+  syncMetadataFromWorkflowFields();
+
+  const res = await fetch(`/api/workflow/${encodeURIComponent(state.imageName)}/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session: {
+        session_id: sessionId,
+        state: sessionState,
+        labeler: state.metadata?.label_source?.labeler || "",
+        reviewer: state.metadata?.label_source?.reviewer ?? null,
+        source,
+        parent_session_id: parentSessionId,
+        metadata: state.metadata,
+      },
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to save label session");
+
+  state.workflow = data.workflow || state.workflow;
+  state.currentSessionId = data.session?.session_id || state.currentSessionId;
+  state.currentSessionState = data.session?.state || state.currentSessionState;
+  renderWorkflowInfo();
+  renderCaseInfo();
+  return data;
+}
+
+async function markReadyForReview() {
+  if (!state.imageLoaded) return;
+  if (!applyMetadataFromTextArea()) return;
+
+  reviewStatusSelect.value = "needs_review";
+  state.currentSessionState = "working";
+  syncMetadataFromWorkflowFields();
+  await saveMetadata();
+  statusEl.textContent = `Marked ${state.imageName} ready for review.`;
+}
+
+async function approveReview() {
+  if (!state.imageLoaded) return;
+  if (!applyMetadataFromTextArea()) return;
+
+  reviewStatusSelect.value = "approved";
+  state.currentSessionState = "reviewed";
+  syncMetadataFromWorkflowFields();
+  await saveMetadata();
+  statusEl.textContent = `Approved ${state.imageName} review session.`;
+}
+
+async function promoteCurrentSessionToGold() {
+  if (!state.imageLoaded) return;
+  if (!applyMetadataFromTextArea()) return;
+
+  if (!state.currentSessionId) {
+    await approveReview();
+  }
+
+  reviewStatusSelect.value = "approved";
+  state.currentSessionState = "gold";
+  syncMetadataFromWorkflowFields();
+
+  const goldSessionId = `gold-${Date.now()}`;
+  await saveSessionRecord({
+    sessionId: goldSessionId,
+    sessionState: "gold",
+    parentSessionId: state.currentSessionId,
+    source: "human",
+  });
+
+  await publishCurrentSession();
+  await fetchCaseSummary();
+  statusEl.textContent = `Promoted ${state.imageName} to gold.`;
+}
+
 async function loadMapByName(imageName) {
   state.imageName = imageName;
   state.imageUrl = `/maps/${encodeURIComponent(imageName)}`;
@@ -1347,6 +1431,27 @@ publishSessionBtn.addEventListener("click", async () => {
     await publishCurrentSession();
   } catch (err) {
     statusEl.textContent = `Publish failed: ${err.message}`;
+  }
+});
+markReadyBtn.addEventListener("click", async () => {
+  try {
+    await markReadyForReview();
+  } catch (err) {
+    statusEl.textContent = `Mark ready failed: ${err.message}`;
+  }
+});
+approveReviewBtn.addEventListener("click", async () => {
+  try {
+    await approveReview();
+  } catch (err) {
+    statusEl.textContent = `Approve failed: ${err.message}`;
+  }
+});
+promoteGoldBtn.addEventListener("click", async () => {
+  try {
+    await promoteCurrentSessionToGold();
+  } catch (err) {
+    statusEl.textContent = `Promote gold failed: ${err.message}`;
   }
 });
 sessionSelect.addEventListener("change", () => {
