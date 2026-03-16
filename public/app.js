@@ -63,9 +63,10 @@ const state = {
   cols: 40,
 
   selectedModel: "gpt-4-mini",
-  overlayMode: "human",
+  overlayMode: "current",
 
   metadata: null,
+  publishedArtifact: null,
 
   viewScale: 1,
   viewX: 20,
@@ -324,13 +325,15 @@ function renderCursorInfo() {
   const { r, c } = state.hoverTile;
   const human = state.metadata?.layers?.blocking?.[r]?.[c] ? "true" : "false";
   const ai = state.metadata?.layers?.ai_blocking?.[r]?.[c] ? "true" : "false";
+  const gold = state.publishedArtifact?.metadata?.layers?.blocking?.[r]?.[c] ? "true" : "false";
   const ambiguous = state.metadata?.layers?.ambiguous?.[r]?.[c] ? "true" : "false";
 
   cursorInfoEl.textContent = [
     `Row: ${r}`,
     `Col: ${c}`,
-    `Human: ${human}`,
+    `Current: ${human}`,
     `AI: ${ai}`,
+    `Gold: ${gold}`,
     `Ambiguous: ${ambiguous}`,
     `Mode: ${state.toolMode}`,
     `Overlay: ${state.overlayMode}`,
@@ -740,6 +743,18 @@ function drawTileRect(r, c, fillStyle, strokeStyle = null, lineWidth = 1) {
   }
 }
 
+function getCurrentBlockingGrid() {
+  return state.metadata?.layers?.blocking || [];
+}
+
+function getAiBlockingGrid() {
+  return state.metadata?.layers?.ai_blocking || [];
+}
+
+function getGoldBlockingGrid() {
+  return state.publishedArtifact?.metadata?.layers?.blocking || [];
+}
+
 function draw() {
   sizeCanvas();
 
@@ -785,8 +800,9 @@ function draw() {
     ctx.stroke();
   }
 
-  const human = state.metadata?.layers?.blocking || [];
-  const ai = state.metadata?.layers?.ai_blocking || [];
+  const human = getCurrentBlockingGrid();
+  const ai = getAiBlockingGrid();
+  const gold = getGoldBlockingGrid();
   const ambiguous = state.metadata?.layers?.ambiguous || [];
 
   for (let r = 0; r < state.rows; r++) {
@@ -795,7 +811,9 @@ function draw() {
       const aiVal = Boolean(ai[r]?.[c]);
       const ambiguousVal = Boolean(ambiguous[r]?.[c]);
 
-      if (state.overlayMode === "human") {
+      const goldVal = Boolean(gold[r]?.[c]);
+
+      if (state.overlayMode === "current") {
         if (humanVal) {
           drawTileRect(r, c, "rgba(220,38,38,0.38)", "rgba(220,38,38,1)");
         }
@@ -803,12 +821,32 @@ function draw() {
         if (aiVal) {
           drawTileRect(r, c, "rgba(249,115,22,0.38)", "rgba(249,115,22,1)");
         }
-      } else if (state.overlayMode === "diff") {
+      } else if (state.overlayMode === "gold") {
+        if (goldVal) {
+          drawTileRect(r, c, "rgba(34,197,94,0.34)", "rgba(34,197,94,1)");
+        }
+      } else if (state.overlayMode === "diff_ai_current") {
         if (humanVal && aiVal) {
           drawTileRect(r, c, "rgba(220,38,38,0.30)", "rgba(220,38,38,0.95)");
         } else if (aiVal && !humanVal) {
           drawTileRect(r, c, "rgba(249,115,22,0.40)", "rgba(249,115,22,1)");
         } else if (humanVal && !aiVal) {
+          drawTileRect(r, c, "rgba(59,130,246,0.40)", "rgba(59,130,246,1)");
+        }
+      } else if (state.overlayMode === "diff_gold_current") {
+        if (humanVal && goldVal) {
+          drawTileRect(r, c, "rgba(34,197,94,0.25)", "rgba(34,197,94,0.95)");
+        } else if (goldVal && !humanVal) {
+          drawTileRect(r, c, "rgba(34,197,94,0.40)", "rgba(34,197,94,1)");
+        } else if (humanVal && !goldVal) {
+          drawTileRect(r, c, "rgba(59,130,246,0.40)", "rgba(59,130,246,1)");
+        }
+      } else if (state.overlayMode === "diff_gold_ai") {
+        if (goldVal && aiVal) {
+          drawTileRect(r, c, "rgba(34,197,94,0.25)", "rgba(34,197,94,0.95)");
+        } else if (aiVal && !goldVal) {
+          drawTileRect(r, c, "rgba(249,115,22,0.40)", "rgba(249,115,22,1)");
+        } else if (goldVal && !aiVal) {
           drawTileRect(r, c, "rgba(59,130,246,0.40)", "rgba(59,130,246,1)");
         }
       } else if (state.overlayMode === "ambiguous") {
@@ -821,6 +859,9 @@ function draw() {
         }
         if (aiVal && !humanVal) {
           drawTileRect(r, c, "rgba(249,115,22,0.28)", null);
+        }
+        if (goldVal && !humanVal && !aiVal) {
+          drawTileRect(r, c, "rgba(34,197,94,0.28)", null);
         }
         if (ambiguousVal) {
           drawTileRect(r, c, null, "rgba(168,85,247,1)", 2);
@@ -952,7 +993,7 @@ async function saveMetadata() {
     }
     statusEl.textContent = `Saved ${state.imageName} metadata.`;
     metadataView.value = JSON.stringify(state.metadata, null, 2);
-    state.workflow = await fetchWorkflowState(state.imageName).then((data) => data.workflow || null);
+    applyWorkflowPayload(await fetchWorkflowState(state.imageName));
     await fetchCaseSummary();
     renderCaseInfo();
   } catch (err) {
@@ -994,7 +1035,7 @@ async function draftAi() {
     state.lastDraftLog = data.draft_log || null;
     state.currentSessionId = data.session?.session_id || state.currentSessionId;
     state.currentSessionState = data.session?.state || "ai_draft";
-    state.workflow = await fetchWorkflowState(state.imageName).then((workflow) => workflow.workflow || null);
+    applyWorkflowPayload(await fetchWorkflowState(state.imageName));
 
     if (data.metadata?.ai_annotation?.model) {
       state.selectedModel = data.metadata.ai_annotation.model;
@@ -1097,6 +1138,11 @@ async function fetchWorkflowState(imageName) {
   return data;
 }
 
+function applyWorkflowPayload(data) {
+  state.workflow = data.workflow || null;
+  state.publishedArtifact = data.published || null;
+}
+
 function loadSessionIntoEditor(sessionId) {
   const session = state.workflow?.sessions?.find((entry) => entry.session_id === sessionId);
   if (!session) return;
@@ -1131,7 +1177,10 @@ async function publishCurrentSession() {
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Failed to publish session");
 
-  state.workflow = data.workflow || state.workflow;
+  applyWorkflowPayload({
+    workflow: data.workflow || state.workflow,
+    published: state.publishedArtifact,
+  });
   if (channel === "reviewed" && state.currentSessionState === "reviewed") {
     statusEl.textContent = `Published reviewed session ${state.currentSessionId}.`;
   } else {
@@ -1166,7 +1215,10 @@ async function saveSessionRecord({
   const data = await res.json();
   if (!res.ok) throw new Error(data.error || "Failed to save label session");
 
-  state.workflow = data.workflow || state.workflow;
+  applyWorkflowPayload({
+    workflow: data.workflow || state.workflow,
+    published: state.published || state.publishedArtifact,
+  });
   state.currentSessionId = data.session?.session_id || state.currentSessionId;
   state.currentSessionState = data.session?.state || state.currentSessionState;
   renderWorkflowInfo();
@@ -1234,7 +1286,7 @@ async function loadMapByName(imageName) {
     fetchWorkflowState(imageName),
   ]);
 
-  state.workflow = workflowData.workflow || null;
+  applyWorkflowPayload(workflowData);
   const preferredSession = pickPreferredSession(state.workflow);
   state.metadata = preferredSession?.metadata || metadataData.metadata;
   state.currentSessionId = preferredSession?.session_id || null;
@@ -1323,6 +1375,7 @@ imageInput.addEventListener("change", async (e) => {
     state.imageUrl = data.imageUrl;
     state.metadata = data.metadata;
     state.workflow = null;
+    state.publishedArtifact = null;
     state.currentSessionId = null;
     state.currentSessionState = "working";
     state.imageWidth = data.metadata?.map?.image_width_px || state.imageWidth;
@@ -1419,7 +1472,7 @@ refreshDashboardBtn.addEventListener("click", () => fetchCaseSummary());
 refreshWorkflowBtn.addEventListener("click", async () => {
   try {
     const data = await fetchWorkflowState(state.imageName);
-    state.workflow = data.workflow || null;
+    applyWorkflowPayload(data);
     renderWorkflowInfo();
     statusEl.textContent = `Refreshed workflow for ${state.imageName}.`;
   } catch (err) {

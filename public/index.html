@@ -104,17 +104,21 @@
           <section class="section">
             <h2>Overlay View</h2>
             <select id="overlayModeSelect">
-              <option value="human">Human Blocking</option>
+              <option value="current">Current Working</option>
               <option value="ai">AI Draft</option>
-              <option value="diff">AI vs Human Diff</option>
+              <option value="gold">Gold / Published</option>
+              <option value="diff_ai_current">AI vs Current Diff</option>
+              <option value="diff_gold_current">Gold vs Current Diff</option>
+              <option value="diff_gold_ai">Gold vs AI Diff</option>
               <option value="ambiguous">Ambiguous Tiles</option>
               <option value="all">All Layers</option>
             </select>
 
             <div id="diffLegend" class="top-gap">
-              Human blocking = red
-              AI only = orange
-              Human only = blue
+              Current = red
+              AI = orange
+              Gold = green
+              Current-only diff = blue
               Ambiguous = purple
             </div>
           </section>
