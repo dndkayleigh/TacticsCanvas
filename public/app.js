@@ -821,6 +821,34 @@ function jumpToNextDifference() {
   statusEl.textContent = `No ${diff.label} differences found on this map.`;
 }
 
+function jumpToPreviousDifference() {
+  const diff = getActiveDiffGrids();
+  if (!diff) {
+    statusEl.textContent = "Select a diff overlay to jump between differences.";
+    return;
+  }
+
+  const start = state.hoverTile
+    ? state.hoverTile.r * state.cols + state.hoverTile.c - 1
+    : state.rows * state.cols - 1;
+
+  for (let offset = 0; offset < state.rows * state.cols; offset++) {
+    const index = (start - offset + state.rows * state.cols) % (state.rows * state.cols);
+    const r = Math.floor(index / state.cols);
+    const c = index % state.cols;
+    const primaryVal = Boolean(diff.primary[r]?.[c]);
+    const secondaryVal = Boolean(diff.secondary[r]?.[c]);
+
+    if (primaryVal !== secondaryVal) {
+      focusTile(r, c);
+      statusEl.textContent = `Jumped to previous ${diff.label} difference at row ${r}, col ${c}.`;
+      return;
+    }
+  }
+
+  statusEl.textContent = `No ${diff.label} differences found on this map.`;
+}
+
 function draw() {
   sizeCanvas();
 
@@ -1750,7 +1778,11 @@ window.addEventListener("keydown", (e) => {
   } else if (e.key === "[") {
     goToRelativeCase(-1);
   } else if (e.key.toLowerCase() === "j") {
-    jumpToNextDifference();
+    if (e.shiftKey) {
+      jumpToPreviousDifference();
+    } else {
+      jumpToNextDifference();
+    }
   } else if (e.key.toLowerCase() === "r") {
     markReadyForReview();
   } else if (e.key.toLowerCase() === "a") {
