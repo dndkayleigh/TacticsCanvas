@@ -87,12 +87,15 @@ const state = {
   caseSummaries: [],
 };
 
+const {
+  makeGrid,
+  normalizeMapMetadata,
+  validateNormalizedMapMetadata,
+  serializeMapMetadata
+} = window.MapMetadata;
+
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
-}
-
-function makeGrid(rows, cols, fill = false) {
-  return Array.from({ length: rows }, () => Array.from({ length: cols }, () => fill));
 }
 
 function deepCopyGrid(grid) {
@@ -201,46 +204,38 @@ function buildBlankMetadata() {
   state.cols = fitted.cols;
   state.tileSize = tileSize;
 
-  return {
-    schema_version: "0.1.0",
-    purpose: "tactical_map_metadata",
-    map: {
-      name: state.imageName,
-      image_ref: state.imageName,
-      image_width_px: state.imageWidth,
-      image_height_px: state.imageHeight,
-    },
-    grid: {
-      type: "square",
-      origin: "bottom_left",
-      tile_size_px: state.tileSize,
-      rows: state.rows,
-      cols: state.cols,
-    },
-    layers: {
-      blocking: makeGrid(state.rows, state.cols, false),
-      ai_blocking: makeGrid(state.rows, state.cols, false),
-      ambiguous: makeGrid(state.rows, state.cols, false),
-    },
-    ai_annotation: {
-      status: "none",
-      model: state.selectedModel,
-      scope: "blocking_only",
-      notes: [],
-    },
-    label_source: {
-      status: "human_gold",
-      labeler: "",
-      review_status: "in_progress",
-      reviewer: null,
-      blocking_rule_version: "v1",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-    case_metadata: {
-      notes: "",
-    },
+  const normalized = normalizeMapMetadata(null, {
+    imageName: state.imageName,
+    imageWidth: state.imageWidth,
+    imageHeight: state.imageHeight,
+  });
+
+  normalized.grid.rows = state.rows;
+  normalized.grid.cols = state.cols;
+  normalized.grid.tileSizePx = state.tileSize;
+
+  normalized.layers.blocking = makeGrid(state.rows, state.cols, false);
+
+  normalized.annotation.ai.status = "none";
+  normalized.annotation.ai.model = state.selectedModel;
+  normalized.annotation.ai.scope = "blocking_only";
+  normalized.annotation.ai.notes = [];
+
+  normalized.annotation.review.labelSource = "human_gold";
+  normalized.annotation.review.labeler = "";
+  normalized.annotation.review.reviewStatus = "in_progress";
+  normalized.annotation.review.reviewer = null;
+  normalized.annotation.review.blockingRuleVersion = "v1";
+  normalized.annotation.review.createdAt = new Date().toISOString();
+  normalized.annotation.review.updatedAt = new Date().toISOString();
+  normalized.annotation.review.notes = "";
+
+  normalized.extensions.tacticsCanvas = {
+    ai_blocking: makeGrid(state.rows, state.cols, false),
+    ambiguous: makeGrid(state.rows, state.cols, false),
   };
+
+  return normalized;
 }
 
 function buildClientPromptPreview() {

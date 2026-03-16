@@ -4,7 +4,7 @@ A browser-based editor for adding tactical metadata to tabletop RPG battle maps.
 
 This project is **not** a virtual tabletop. It is a companion tool for preparing map metadata that a VTT can consume later.
 
-The current MVP focuses on a single tactical layer: **blocking / impassable tiles**.
+The current implementation still centers on **blocking / impassable annotation**, but it already includes review workflow and AI-assist tooling beyond the original MVP.
 
 <img width="1905" height="983" alt="image" src="https://github.com/user-attachments/assets/670fff87-a616-444d-b48b-5ce6d274d40b" />
 **Tactical Map Metadata Editor interface.** The web-based editor displays a battle map on the right with a square grid and a semi-transparent red overlay marking tiles labeled as blocking or impassable. The left control panel supports map upload, OpenAI model selection, AI-assisted metadata drafting, and JSON save/export, while a live metadata viewer below shows the current map schema, grid calibration, and blocking layer. This interface is designed for human-in-the-loop review and correction of AI-generated tactical map metadata before downstream use in a virtual tabletop system. Image courtesy Dyson Logos (Crumbling Gate - Gridless).
@@ -27,20 +27,31 @@ You upload a map image, review or create a matching sidecar JSON file, optionall
 - Upload a battle map image
 - Load existing sidecar JSON metadata, or create it automatically
 - Generate a default square grid from image aspect ratio
-- Pan with left-click drag
+- Navigate between maps in a case queue
+- Review dashboard with filter/sort controls
+- Pan with drag
 - Zoom with mouse wheel
-- Toggle blocking tiles with right click
+- Paint blocking tiles
+- Erase blocking tiles
+- Mark ambiguous tiles
+- Undo / redo edits
+- Compare human, AI, ambiguous, and diff overlays
+- Accept or clear AI draft layers
+- View cursor and disagreement metrics
+- Track labeler, review status, and notes
 - View and edit metadata as JSON
 - Draft blocking tiles with OpenAI
 - Log model usage, token counts, and turnaround time
 
 ## Current scope
 
-This MVP supports:
+This version supports:
 
 - square grids only
 - bottom-left grid origin
-- blocking tiles only
+- blocking tiles as the current canonical annotation in-app
+- human review workflow
+- AI-assisted draft workflow
 
 It does **not** yet support:
 
@@ -48,8 +59,7 @@ It does **not** yet support:
 - cover
 - hazards
 - elevation
-- doors as a separate layer
-- edge-based wall metadata
+- universal edge-based wall metadata as the persisted contract
 - full VTT gameplay
 
 ## Grid behavior
@@ -130,6 +140,11 @@ The AI task is intentionally narrow:
 
 The full transmitted prompt is shown in the UI after each draft.
 
+`OPENAI_API_KEY` is optional for running the app.
+
+- Without a key, the editor still loads, saves, and reviews maps normally.
+- AI draft requests will return an error until a valid key is configured.
+
 ## Logging
 
 Each draft request is logged to:
@@ -170,7 +185,7 @@ tactical-map-editor/
 
 - Node.js 18+
 - npm
-- OpenAI API key
+- OpenAI API key only if you want AI drafting
 
 ### Install
 
@@ -222,6 +237,12 @@ Example response:
 }
 ```
 
+If no API key is configured, the `ai` field will report:
+
+```json
+"missing_api_key"
+```
+
 ## Main endpoints
 
 - `POST /api/upload-map` — upload image and load or create metadata
@@ -253,11 +274,12 @@ That separation keeps the tool focused and makes the metadata reusable.
 
 Likely next steps:
 
-- paint vs erase mode
-- undo / redo
-- door layer
-- ambiguity / confidence reporting
-- cover and difficult terrain layers
+- universal edge-based sidecar schema
+- faster review navigation and adjudication workflows
+- multiple labelers on the same map
+- gold vs AI vs working label comparison
+- grid alignment and suggested tile-size labeling
+- training-data export and annotation dictionaries
 - schema validation
 - import/export bundles instead of simple sidecars
 
@@ -273,4 +295,3 @@ Current workflow:
 4. draft blocking with AI  
 5. edit by hand  
 6. save finalized sidecar JSON
-
