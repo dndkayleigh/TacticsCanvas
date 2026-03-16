@@ -755,6 +755,72 @@ function getGoldBlockingGrid() {
   return state.publishedArtifact?.metadata?.layers?.blocking || [];
 }
 
+function getActiveDiffGrids() {
+  if (state.overlayMode === "diff_ai_current") {
+    return {
+      primary: getCurrentBlockingGrid(),
+      secondary: getAiBlockingGrid(),
+      label: "AI vs current",
+    };
+  }
+
+  if (state.overlayMode === "diff_gold_current") {
+    return {
+      primary: getCurrentBlockingGrid(),
+      secondary: getGoldBlockingGrid(),
+      label: "Gold vs current",
+    };
+  }
+
+  if (state.overlayMode === "diff_gold_ai") {
+    return {
+      primary: getGoldBlockingGrid(),
+      secondary: getAiBlockingGrid(),
+      label: "Gold vs AI",
+    };
+  }
+
+  return null;
+}
+
+function focusTile(r, c) {
+  state.hoverTile = { r, c };
+  const tileX = c * state.tileSize + state.tileSize / 2;
+  const tileY = state.imageHeight - (r + 0.5) * state.tileSize;
+  state.viewX = canvas.width / 2 - tileX * state.viewScale;
+  state.viewY = canvas.height / 2 - tileY * state.viewScale;
+  renderCursorInfo();
+  draw();
+}
+
+function jumpToNextDifference() {
+  const diff = getActiveDiffGrids();
+  if (!diff) {
+    statusEl.textContent = "Select a diff overlay to jump between differences.";
+    return;
+  }
+
+  const start = state.hoverTile
+    ? state.hoverTile.r * state.cols + state.hoverTile.c + 1
+    : 0;
+
+  for (let offset = 0; offset < state.rows * state.cols; offset++) {
+    const index = (start + offset) % (state.rows * state.cols);
+    const r = Math.floor(index / state.cols);
+    const c = index % state.cols;
+    const primaryVal = Boolean(diff.primary[r]?.[c]);
+    const secondaryVal = Boolean(diff.secondary[r]?.[c]);
+
+    if (primaryVal !== secondaryVal) {
+      focusTile(r, c);
+      statusEl.textContent = `Jumped to next ${diff.label} difference at row ${r}, col ${c}.`;
+      return;
+    }
+  }
+
+  statusEl.textContent = `No ${diff.label} differences found on this map.`;
+}
+
 function draw() {
   sizeCanvas();
 
@@ -1663,6 +1729,10 @@ window.addEventListener("keydown", (e) => {
     return;
   }
 
+  if (["INPUT", "TEXTAREA", "SELECT"].includes(document.activeElement?.tagName)) {
+    return;
+  }
+
   if (e.key.toLowerCase() === "p") {
     state.toolMode = "paint";
     renderModeButtons();
@@ -1675,6 +1745,48 @@ window.addEventListener("keydown", (e) => {
   } else if (e.key.toLowerCase() === "h") {
     state.toolMode = "pan";
     renderModeButtons();
+  } else if (e.key === "]") {
+    goToRelativeCase(1);
+  } else if (e.key === "[") {
+    goToRelativeCase(-1);
+  } else if (e.key.toLowerCase() === "j") {
+    jumpToNextDifference();
+  } else if (e.key.toLowerCase() === "r") {
+    markReadyForReview();
+  } else if (e.key.toLowerCase() === "a") {
+    approveReview();
+  } else if (e.key.toLowerCase() === "g") {
+    promoteCurrentSessionToGold();
+  } else if (e.key === "1") {
+    state.overlayMode = "current";
+    overlayModeSelect.value = state.overlayMode;
+    renderCursorInfo();
+    draw();
+  } else if (e.key === "2") {
+    state.overlayMode = "ai";
+    overlayModeSelect.value = state.overlayMode;
+    renderCursorInfo();
+    draw();
+  } else if (e.key === "3") {
+    state.overlayMode = "gold";
+    overlayModeSelect.value = state.overlayMode;
+    renderCursorInfo();
+    draw();
+  } else if (e.key === "4") {
+    state.overlayMode = "diff_ai_current";
+    overlayModeSelect.value = state.overlayMode;
+    renderCursorInfo();
+    draw();
+  } else if (e.key === "5") {
+    state.overlayMode = "diff_gold_current";
+    overlayModeSelect.value = state.overlayMode;
+    renderCursorInfo();
+    draw();
+  } else if (e.key === "6") {
+    state.overlayMode = "diff_gold_ai";
+    overlayModeSelect.value = state.overlayMode;
+    renderCursorInfo();
+    draw();
   }
 });
 
