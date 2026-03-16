@@ -154,7 +154,8 @@ button:hover {
 #mapMetrics,
 #draftMetrics,
 #cursorInfo,
-#diffLegend {
+#diffLegend,
+#workflowInfo {
   white-space: pre-wrap;
   font-family: Consolas, Monaco, monospace;
   font-size: 12px;

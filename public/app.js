@@ -26,6 +26,10 @@ const modePanBtn = document.getElementById("modePanBtn");
 const labelerInput = document.getElementById("labelerInput");
 const reviewStatusSelect = document.getElementById("reviewStatusSelect");
 const notesInput = document.getElementById("notesInput");
+const sessionSelect = document.getElementById("sessionSelect");
+const refreshWorkflowBtn = document.getElementById("refreshWorkflowBtn");
+const publishSessionBtn = document.getElementById("publishSessionBtn");
+const workflowInfoEl = document.getElementById("workflowInfo");
 
 const caseFilterSelect = document.getElementById("caseFilterSelect");
 const caseSortSelect = document.getElementById("caseSortSelect");
@@ -343,6 +347,52 @@ function renderCaseInfo() {
   ].join("\n");
 }
 
+function renderWorkflowInfo() {
+  const sessions = state.workflow?.sessions || [];
+  const currentPublished = state.workflow?.current_published;
+
+  if (!state.imageLoaded && !sessions.length) {
+    workflowInfoEl.textContent = "No workflow loaded.";
+    sessionSelect.innerHTML = "";
+    return;
+  }
+
+  sessionSelect.innerHTML = "";
+
+  if (!sessions.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No saved sessions";
+    sessionSelect.appendChild(option);
+  } else {
+    const sortedSessions = [...sessions].sort((a, b) => {
+      const stateDelta = scoreSessionState(b) - scoreSessionState(a);
+      if (stateDelta !== 0) return stateDelta;
+      return String(b.updated_at || "").localeCompare(String(a.updated_at || ""));
+    });
+
+    for (const session of sortedSessions) {
+      const option = document.createElement("option");
+      option.value = session.session_id;
+      option.textContent = `${session.state} • ${session.labeler || "unassigned"} • ${session.session_id}`;
+      if (session.session_id === state.currentSessionId) {
+        option.selected = true;
+      }
+      sessionSelect.appendChild(option);
+    }
+  }
+
+  workflowInfoEl.textContent = [
+    `Sessions: ${sessions.length}`,
+    `Active: ${state.currentSessionState}${state.currentSessionId ? ` (${state.currentSessionId})` : ""}`,
+    `Published: ${
+      currentPublished
+        ? `${currentPublished.channel} v${currentPublished.release_version} from ${currentPublished.source_session_id}`
+        : "none"
+    }`,
+  ].join("\n");
+}
+
 function renderMapMetrics() {
   if (!state.metadata?.layers) {
     mapMetricsEl.textContent = "No map loaded.";
@@ -556,6 +606,7 @@ function syncMetadata() {
   renderMapMetrics();
   renderCaseList();
   renderSummaryMetrics();
+  renderWorkflowInfo();
 }
 
 function applyMetadataFromTextArea() {
@@ -898,6 +949,7 @@ async function saveMetadata() {
     }
     statusEl.textContent = `Saved ${state.imageName} metadata.`;
     metadataView.value = JSON.stringify(state.metadata, null, 2);
+    state.workflow = await fetchWorkflowState(state.imageName).then((data) => data.workflow || null);
     await fetchCaseSummary();
     renderCaseInfo();
   } catch (err) {
@@ -939,6 +991,7 @@ async function draftAi() {
     state.lastDraftLog = data.draft_log || null;
     state.currentSessionId = data.session?.session_id || state.currentSessionId;
     state.currentSessionState = data.session?.state || "ai_draft";
+    state.workflow = await fetchWorkflowState(state.imageName).then((workflow) => workflow.workflow || null);
 
     if (data.metadata?.ai_annotation?.model) {
       state.selectedModel = data.metadata.ai_annotation.model;
@@ -1041,6 +1094,49 @@ async function fetchWorkflowState(imageName) {
   return data;
 }
 
+function loadSessionIntoEditor(sessionId) {
+  const session = state.workflow?.sessions?.find((entry) => entry.session_id === sessionId);
+  if (!session) return;
+
+  state.currentSessionId = session.session_id;
+  state.currentSessionState = session.state || "working";
+  state.metadata = session.metadata;
+  state.imageWidth = state.metadata?.map?.image_width_px || state.imageWidth;
+  state.imageHeight = state.metadata?.map?.image_height_px || state.imageHeight;
+  state.rows = state.metadata?.grid?.rows || state.rows;
+  state.cols = state.metadata?.grid?.cols || state.cols;
+  state.tileSize = state.metadata?.grid?.tile_size_px || state.tileSize;
+  state.historyUndo = [];
+  state.historyRedo = [];
+  syncWorkflowFieldsFromMetadata();
+  syncMetadata();
+  draw();
+}
+
+async function publishCurrentSession() {
+  if (!state.imageName || !state.currentSessionId) return;
+
+  const channel = state.currentSessionState === "gold" ? "gold" : "reviewed";
+  const res = await fetch(`/api/workflow/${encodeURIComponent(state.imageName)}/publish`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      session_id: state.currentSessionId,
+      channel,
+    }),
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Failed to publish session");
+
+  state.workflow = data.workflow || state.workflow;
+  if (channel === "reviewed" && state.currentSessionState === "reviewed") {
+    statusEl.textContent = `Published reviewed session ${state.currentSessionId}.`;
+  } else {
+    statusEl.textContent = `Published session ${state.currentSessionId} to ${channel}.`;
+  }
+  renderWorkflowInfo();
+}
+
 async function loadMapByName(imageName) {
   state.imageName = imageName;
   state.imageUrl = `/maps/${encodeURIComponent(imageName)}`;
@@ -1080,6 +1176,7 @@ async function loadMapByName(imageName) {
     statusEl.textContent = preferredSession
       ? `Loaded ${state.imageName} from ${preferredSession.state} session.`
       : `Loaded ${state.imageName}.`;
+    renderWorkflowInfo();
   };
 
   hiddenImage.src = state.imageUrl;
@@ -1179,6 +1276,7 @@ imageInput.addEventListener("change", async (e) => {
       statusEl.textContent = data.sidecarFound
         ? `Loaded ${state.imageName} with existing sidecar metadata.`
         : `Loaded ${state.imageName}; created blank sidecar metadata.`;
+      renderWorkflowInfo();
     };
 
     hiddenImage.src = data.imageUrl;
@@ -1234,6 +1332,30 @@ prevCaseBtn.addEventListener("click", () => goToRelativeCase(-1));
 nextCaseBtn.addEventListener("click", () => goToRelativeCase(1));
 nextNeedsReviewBtn.addEventListener("click", () => goToNextNeedsReview());
 refreshDashboardBtn.addEventListener("click", () => fetchCaseSummary());
+refreshWorkflowBtn.addEventListener("click", async () => {
+  try {
+    const data = await fetchWorkflowState(state.imageName);
+    state.workflow = data.workflow || null;
+    renderWorkflowInfo();
+    statusEl.textContent = `Refreshed workflow for ${state.imageName}.`;
+  } catch (err) {
+    statusEl.textContent = `Workflow refresh failed: ${err.message}`;
+  }
+});
+publishSessionBtn.addEventListener("click", async () => {
+  try {
+    await publishCurrentSession();
+  } catch (err) {
+    statusEl.textContent = `Publish failed: ${err.message}`;
+  }
+});
+sessionSelect.addEventListener("change", () => {
+  if (!sessionSelect.value) return;
+  loadSessionIntoEditor(sessionSelect.value);
+  renderCaseInfo();
+  renderWorkflowInfo();
+  statusEl.textContent = `Loaded session ${sessionSelect.value}.`;
+});
 
 acceptAiBtn.addEventListener("click", acceptAiDraft);
 clearAiBtn.addEventListener("click", clearAiDraft);
