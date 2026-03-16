@@ -159,6 +159,18 @@ function countAgreement(human, ai) {
   return total;
 }
 
+function countDifferences(primary, secondary, rows = state.rows, cols = state.cols) {
+  let total = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      if (Boolean(primary[r]?.[c]) !== Boolean(secondary[r]?.[c])) {
+        total += 1;
+      }
+    }
+  }
+  return total;
+}
+
 function computeDefaultGridForImage(imageWidth, imageHeight) {
   if (imageWidth >= imageHeight) {
     const cols = 40;
@@ -405,23 +417,35 @@ function renderMapMetrics() {
     return;
   }
 
-  const human = state.metadata.layers.blocking || [];
-  const ai = state.metadata.layers.ai_blocking || [];
+  const human = getCurrentBlockingGrid();
+  const ai = getAiBlockingGrid();
+  const gold = getGoldBlockingGrid();
   const ambiguous = state.metadata.layers.ambiguous || [];
 
   const humanCount = countTrue(human);
   const aiCount = countTrue(ai);
+  const goldCount = countTrue(gold);
   const aiOnly = countAiOnly(human, ai);
   const humanOnly = countHumanOnly(human, ai);
   const ambiguousCount = countTrue(ambiguous);
   const disagreement = aiOnly + humanOnly;
+  const goldVsCurrent = countDifferences(gold, human);
+  const goldVsAi = countDifferences(gold, ai);
+  const activeDiff = getActiveDiffGrids();
+  const activeDiffCount = activeDiff
+    ? countDifferences(activeDiff.primary, activeDiff.secondary)
+    : null;
 
   mapMetricsEl.textContent = [
-    `Human blocking: ${humanCount}`,
+    `Current blocking: ${humanCount}`,
     `AI blocking: ${aiCount}`,
+    `Gold blocking: ${goldCount}`,
     `AI only: ${aiOnly}`,
-    `Human only: ${humanOnly}`,
-    `Disagreement: ${disagreement}`,
+    `Current only: ${humanOnly}`,
+    `AI vs current: ${disagreement}`,
+    `Gold vs current: ${goldVsCurrent}`,
+    `Gold vs AI: ${goldVsAi}`,
+    `Active overlay diff: ${activeDiffCount ?? "n/a"}`,
     `Ambiguous: ${ambiguousCount}`,
   ].join("\n");
 }
