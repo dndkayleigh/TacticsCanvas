@@ -5,8 +5,14 @@ const path = require("path");
 
 const { app } = require("../server");
 const { sidecarPathForImageName } = require("../server/sidecars");
+const {
+  publishedArtifactPathForImageName,
+  sessionStorePathForImageName,
+} = require("../server/workflowStore");
 
 const MAP_DIR = path.join(__dirname, "..", "data", "maps");
+const WORKFLOW_DIR = path.join(__dirname, "..", "data", "workflow");
+const PUBLISHED_DIR = path.join(__dirname, "..", "data", "published");
 
 async function withServer(run) {
   const server = await new Promise((resolve) => {
@@ -75,6 +81,7 @@ test("metadata can be saved and loaded back for a map", async () => {
   const imageName = `test-roundtrip-${Date.now()}.png`;
   const imagePath = path.join(MAP_DIR, imageName);
   const sidecarPath = sidecarPathForImageName(MAP_DIR, imageName);
+  const workflowPath = sessionStorePathForImageName(WORKFLOW_DIR, imageName);
 
   fs.writeFileSync(imagePath, "test-image", "utf8");
 
@@ -119,6 +126,7 @@ test("metadata can be saved and loaded back for a map", async () => {
   } finally {
     fs.rmSync(imagePath, { force: true });
     fs.rmSync(sidecarPath, { force: true });
+    fs.rmSync(workflowPath, { force: true });
   }
 });
 
@@ -158,6 +166,7 @@ test("POST /api/upload-map creates a sidecar for a newly uploaded map", async ()
   const imageName = `test-upload-${Date.now()}.png`;
   const imagePath = path.join(MAP_DIR, imageName);
   const sidecarPath = sidecarPathForImageName(MAP_DIR, imageName);
+  const workflowPath = sessionStorePathForImageName(WORKFLOW_DIR, imageName);
 
   try {
     await withServer(async (baseUrl) => {
@@ -186,5 +195,79 @@ test("POST /api/upload-map creates a sidecar for a newly uploaded map", async ()
   } finally {
     fs.rmSync(imagePath, { force: true });
     fs.rmSync(sidecarPath, { force: true });
+    fs.rmSync(workflowPath, { force: true });
+  }
+});
+
+test("workflow endpoints can save sessions and publish a canonical artifact", async () => {
+  const imageName = `test-workflow-api-${Date.now()}.png`;
+  const imagePath = path.join(MAP_DIR, imageName);
+  const workflowPath = sessionStorePathForImageName(WORKFLOW_DIR, imageName);
+  const publishedPath = publishedArtifactPathForImageName(PUBLISHED_DIR, imageName);
+
+  fs.writeFileSync(imagePath, "test-image", "utf8");
+
+  try {
+    await withServer(async (baseUrl) => {
+      const sessionPayload = {
+        session: {
+          session_id: "session-1",
+          state: "reviewed",
+          labeler: "alice",
+          reviewer: "bob",
+          metadata: {
+            map: {
+              image_ref: imageName,
+              image_width_px: 200,
+              image_height_px: 100,
+            },
+            grid: {
+              rows: 10,
+              cols: 10,
+            },
+            layers: {
+              blocking: [[true, false]],
+            },
+          },
+        },
+      };
+
+      const saveSessionResponse = await fetch(`${baseUrl}/api/workflow/${imageName}/sessions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(sessionPayload),
+      });
+      assert.equal(saveSessionResponse.status, 200);
+
+      const workflowResponse = await fetch(`${baseUrl}/api/workflow/${imageName}`);
+      assert.equal(workflowResponse.status, 200);
+      const workflowBody = await workflowResponse.json();
+      assert.equal(workflowBody.workflow.sessions.length, 1);
+      assert.equal(workflowBody.workflow.sessions[0].state, "reviewed");
+      assert.equal(workflowBody.published, null);
+
+      const publishResponse = await fetch(`${baseUrl}/api/workflow/${imageName}/publish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          session_id: "session-1",
+          channel: "gold",
+        }),
+      });
+      assert.equal(publishResponse.status, 200);
+      const publishBody = await publishResponse.json();
+      assert.equal(publishBody.published.channel, "gold");
+      assert.equal(publishBody.published.source_session_id, "session-1");
+
+      const publishedResponse = await fetch(`${baseUrl}/api/published/${imageName}`);
+      assert.equal(publishedResponse.status, 200);
+      const publishedBody = await publishedResponse.json();
+      assert.equal(publishedBody.published.channel, "gold");
+      assert.equal(publishedBody.published.release_version, 1);
+    });
+  } finally {
+    fs.rmSync(imagePath, { force: true });
+    fs.rmSync(workflowPath, { force: true });
+    fs.rmSync(publishedPath, { force: true });
   }
 });
