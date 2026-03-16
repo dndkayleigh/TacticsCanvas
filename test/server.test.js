@@ -153,3 +153,38 @@ test("POST /api/draft-blocking returns a graceful error when no API key is confi
     assert.equal(body.error, "OPENAI_API_KEY is not set on the server.");
   });
 });
+
+test("POST /api/upload-map creates a sidecar for a newly uploaded map", async () => {
+  const imageName = `test-upload-${Date.now()}.png`;
+  const imagePath = path.join(MAP_DIR, imageName);
+  const sidecarPath = sidecarPathForImageName(MAP_DIR, imageName);
+
+  try {
+    await withServer(async (baseUrl) => {
+      const form = new FormData();
+      form.set("mapImage", new Blob(["fake-png-bytes"], { type: "image/png" }), imageName);
+      form.set("imageWidth", "320");
+      form.set("imageHeight", "160");
+
+      const response = await fetch(`${baseUrl}/api/upload-map`, {
+        method: "POST",
+        body: form,
+      });
+
+      assert.equal(response.status, 200);
+      const body = await response.json();
+      assert.equal(body.imageName, imageName);
+      assert.equal(body.sidecarFound, false);
+      assert.equal(body.metadata.map.image_ref, imageName);
+      assert.equal(body.metadata.map.image_width_px, 320);
+      assert.equal(body.metadata.map.image_height_px, 160);
+      assert.equal(body.metadata.grid.rows, 20);
+      assert.equal(body.metadata.grid.cols, 40);
+      assert.equal(fs.existsSync(imagePath), true);
+      assert.equal(fs.existsSync(sidecarPath), true);
+    });
+  } finally {
+    fs.rmSync(imagePath, { force: true });
+    fs.rmSync(sidecarPath, { force: true });
+  }
+});

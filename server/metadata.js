@@ -31,6 +31,32 @@ function computeTileSizeFromGrid(width, height, rows, cols) {
   return Math.max(1, Math.round((sizeFromCols + sizeFromRows) / 2));
 }
 
+function inferGridFromLayers(layers) {
+  const candidates = [
+    layers?.blocking,
+    layers?.ai_blocking,
+    layers?.ambiguous,
+  ].filter(Array.isArray);
+
+  let rows = 0;
+  let cols = 0;
+
+  for (const grid of candidates) {
+    rows = Math.max(rows, grid.length);
+    for (const row of grid) {
+      if (Array.isArray(row)) {
+        cols = Math.max(cols, row.length);
+      }
+    }
+  }
+
+  if (rows > 0 && cols > 0) {
+    return { rows, cols };
+  }
+
+  return null;
+}
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -41,9 +67,10 @@ function ensureMetadataShape(metadata, imageName, width, height) {
   }
 
   const defaultGrid = computeDefaultGridForImage(width, height);
+  const inferredGrid = inferGridFromLayers(metadata.layers);
   const bounded = enforceAspectBoundedGrid(
-    metadata?.grid?.rows || defaultGrid.rows,
-    metadata?.grid?.cols || defaultGrid.cols,
+    metadata?.grid?.rows || inferredGrid?.rows || defaultGrid.rows,
+    metadata?.grid?.cols || inferredGrid?.cols || defaultGrid.cols,
     width,
     height
   );
@@ -111,6 +138,7 @@ module.exports = {
   computeDefaultGridForImage,
   enforceAspectBoundedGrid,
   computeTileSizeFromGrid,
+  inferGridFromLayers,
   nowIso,
   ensureMetadataShape,
 };
