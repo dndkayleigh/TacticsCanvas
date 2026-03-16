@@ -993,6 +993,18 @@ function getActiveDiffGrids() {
   return null;
 }
 
+function getActiveEdgeDiffLayers() {
+  if (state.overlayMode === "diff_edge_gold_current") {
+    return {
+      primary: getCurrentEdgeBlockingLayer(),
+      secondary: getGoldEdgeBlockingLayer(),
+      label: "Gold vs current edge",
+    };
+  }
+
+  return null;
+}
+
 function focusTile(r, c) {
   state.hoverTile = { r, c };
   state.hoverEdge = null;
@@ -1004,7 +1016,71 @@ function focusTile(r, c) {
   draw();
 }
 
+function focusEdge(edge) {
+  state.hoverEdge = edge;
+  state.hoverTile = null;
+
+  let imageX;
+  let imageY;
+
+  if (edge.orientation === "horizontal") {
+    imageX = (edge.x + 0.5) * state.tileSize;
+    imageY = state.imageHeight - edge.y * state.tileSize;
+  } else {
+    imageX = edge.x * state.tileSize;
+    imageY = state.imageHeight - (edge.y + 0.5) * state.tileSize;
+  }
+
+  state.viewX = canvas.width / 2 - imageX * state.viewScale;
+  state.viewY = canvas.height / 2 - imageY * state.viewScale;
+  renderCursorInfo();
+  draw();
+}
+
 function jumpToNextDifference() {
+  const edgeDiff = getActiveEdgeDiffLayers();
+  if (edgeDiff) {
+    const orderedEdges = [];
+    for (let y = 0; y < state.rows + 1; y++) {
+      for (let x = 0; x < state.cols; x++) {
+        orderedEdges.push({ orientation: "horizontal", y, x });
+      }
+    }
+    for (let y = 0; y < state.rows; y++) {
+      for (let x = 0; x < state.cols + 1; x++) {
+        orderedEdges.push({ orientation: "vertical", y, x });
+      }
+    }
+
+    const start = state.hoverEdge
+      ? orderedEdges.findIndex(
+          (edge) =>
+            edge.orientation === state.hoverEdge.orientation &&
+            edge.y === state.hoverEdge.y &&
+            edge.x === state.hoverEdge.x
+        ) + 1
+      : 0;
+
+    for (let offset = 0; offset < orderedEdges.length; offset++) {
+      const edge = orderedEdges[(start + offset) % orderedEdges.length];
+      const primaryVal = edge.orientation === "horizontal"
+        ? Boolean(edgeDiff.primary?.horizontal?.[edge.y]?.[edge.x])
+        : Boolean(edgeDiff.primary?.vertical?.[edge.y]?.[edge.x]);
+      const secondaryVal = edge.orientation === "horizontal"
+        ? Boolean(edgeDiff.secondary?.horizontal?.[edge.y]?.[edge.x])
+        : Boolean(edgeDiff.secondary?.vertical?.[edge.y]?.[edge.x]);
+
+      if (primaryVal !== secondaryVal) {
+        focusEdge(edge);
+        statusEl.textContent = `Jumped to next ${edgeDiff.label} difference at ${edge.orientation} (${edge.y}, ${edge.x}).`;
+        return;
+      }
+    }
+
+    statusEl.textContent = `No ${edgeDiff.label} differences found on this map.`;
+    return;
+  }
+
   const diff = getActiveDiffGrids();
   if (!diff) {
     statusEl.textContent = "Select a diff overlay to jump between differences.";
@@ -1033,6 +1109,50 @@ function jumpToNextDifference() {
 }
 
 function jumpToPreviousDifference() {
+  const edgeDiff = getActiveEdgeDiffLayers();
+  if (edgeDiff) {
+    const orderedEdges = [];
+    for (let y = 0; y < state.rows + 1; y++) {
+      for (let x = 0; x < state.cols; x++) {
+        orderedEdges.push({ orientation: "horizontal", y, x });
+      }
+    }
+    for (let y = 0; y < state.rows; y++) {
+      for (let x = 0; x < state.cols + 1; x++) {
+        orderedEdges.push({ orientation: "vertical", y, x });
+      }
+    }
+
+    const start = state.hoverEdge
+      ? orderedEdges.findIndex(
+          (edge) =>
+            edge.orientation === state.hoverEdge.orientation &&
+            edge.y === state.hoverEdge.y &&
+            edge.x === state.hoverEdge.x
+        ) - 1
+      : orderedEdges.length - 1;
+
+    for (let offset = 0; offset < orderedEdges.length; offset++) {
+      const index = (start - offset + orderedEdges.length) % orderedEdges.length;
+      const edge = orderedEdges[index];
+      const primaryVal = edge.orientation === "horizontal"
+        ? Boolean(edgeDiff.primary?.horizontal?.[edge.y]?.[edge.x])
+        : Boolean(edgeDiff.primary?.vertical?.[edge.y]?.[edge.x]);
+      const secondaryVal = edge.orientation === "horizontal"
+        ? Boolean(edgeDiff.secondary?.horizontal?.[edge.y]?.[edge.x])
+        : Boolean(edgeDiff.secondary?.vertical?.[edge.y]?.[edge.x]);
+
+      if (primaryVal !== secondaryVal) {
+        focusEdge(edge);
+        statusEl.textContent = `Jumped to previous ${edgeDiff.label} difference at ${edge.orientation} (${edge.y}, ${edge.x}).`;
+        return;
+      }
+    }
+
+    statusEl.textContent = `No ${edgeDiff.label} differences found on this map.`;
+    return;
+  }
+
   const diff = getActiveDiffGrids();
   if (!diff) {
     statusEl.textContent = "Select a diff overlay to jump between differences.";
